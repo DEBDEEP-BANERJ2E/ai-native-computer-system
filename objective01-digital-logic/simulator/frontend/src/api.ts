@@ -7,6 +7,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body;
 }
 
+export function health() {
+  return request<{ ok: boolean }>("/api/health").then((body) => body.ok);
+}
+
 export function execute(a: number, b: number, opcode: number) {
   return request<SimulationResponse>("/api/execute", { method: "POST", body: JSON.stringify({ a, b, opcode }) });
 }

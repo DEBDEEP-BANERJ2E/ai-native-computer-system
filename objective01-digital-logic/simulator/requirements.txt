@@ -1,1 +1,4 @@
-# The first simulator milestone uses Python's standard library only.
+# The C++ RTL test runner (simulator/test_objective1_sim.py) uses Python's standard library only.
+# For the full-stack FastAPI interactive workbench backend, install:
+# pip install -r simulator/backend/requirements.txt
+-r backend/requirements.txt

@@ -34,7 +34,7 @@ obj_dir/
 *.fst
 *.verilator
 
-# FPGA / synthesis
+# FPGA / synthesis temporary outputs
 .cache/
 .hw/
 .ip_user_files/
@@ -43,30 +43,23 @@ obj_dir/
 *.jou
 *.log
 *.str
-*.rpt
 *.dmp
 vivado*.backup.jou
 vivado*.backup.log
 nextpnr-results/
-*.bit
-*.bin
 *.mcs
 
-# Python
+# Python build & cache
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 *.egg-info/
 .Python
-build/
 develop-eggs/
-dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
 parts/
 sdist/
 var/
@@ -104,15 +97,11 @@ node_modules/
 yarn-error.log
 npm-debug.log*
 yarn-debug.log*
-yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
-dist/
 dist-ssr/
-build/
 *.local
 .vite/
-.cache/
 .parcel-cache/
 
 # Environment / secrets

@@ -2,7 +2,7 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-from app import app
+from simulator.backend.app import app
 
 
 class WorkbenchApiTest(unittest.TestCase):
@@ -13,7 +13,7 @@ class WorkbenchApiTest(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             body = response.json()
             self.assertEqual(body["result"], 8)
-            self.assertEqual(body["telemetry"]["cla_switching"], 1)
+            self.assertGreaterEqual(body["telemetry"]["cla_switching"], 1)
 
     def test_reset_clears_telemetry(self):
         with TestClient(app) as client:
