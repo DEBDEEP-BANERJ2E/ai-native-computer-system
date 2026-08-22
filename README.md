@@ -15,6 +15,7 @@ building blocks implemented under `objective01-digital-logic/`:
 - Parameterized register and logical/arithmetic shifter
 - Parameterized ripple-carry adder with carry-in and carry-out
 - Parameterized carry-lookahead adder, including a 32-bit configuration
+- Flat and hierarchical (4-bit block) carry-lookahead adders
 - Parameterized unsigned shift-and-add multiplier baseline
 - Signed Radix-4 Booth multiplier
 - Wallace-style carry-save reduction tree
@@ -24,6 +25,8 @@ building blocks implemented under `objective01-digital-logic/`:
 - Memory-mapped telemetry block with switching and EDP proxy counters
 - Python golden models for arithmetic, ALU, and telemetry behavior
 - Chisel SystemVerilog generation for individual benchmark targets and the integrated subsystem
+- Artix-7-oriented Yosys mapping statistics workflow
+- Registered timing wrappers for fair adder and multiplier comparisons
 - Exhaustive truth-table tests for both reversible gates
 - ChiselTest coverage for both muxes
 - Exhaustive 8-bit addition coverage for the ripple-carry baseline
@@ -129,6 +132,15 @@ bash verification/verilator_lint.sh
 # Structural Yosys statistics for each generated benchmark top
 bash verification/yosys_stats.sh
 
+# Flattened, no-I/O-pad Xilinx 7-series mapped resource statistics as CSV
+bash verification/yosys_xc7_stats.sh
+
+# Differentially compare Python ALU results with Verilator RTL execution
+python verification/python_verilator_alu.py
+
+# On a Vivado-capable machine, run Artix-7 reports
+vivado -mode batch -source verification/vivado/run_vivado.tcl
+
 # Run the Python golden models
 cd reference
 python -m unittest test_models.py -v
@@ -145,10 +157,43 @@ The generated benchmark tops support these comparisons:
 Yosys provides structural comparison. Vivado remains authoritative for
 Artix-7 timing, FPGA resources, and power estimates.
 
+The Vivado flow is prepared for part `xc7a100tcsg324-1`, with a placeholder
+10 ns clock constraint. The actual Nexys A7 clock package pin must be filled in
+from the board's master XDC before trusting timing results. Vivado is not
+installed in the current macOS environment, so no FPGA timing or power result
+is claimed yet.
+
+The current flattened `synth_xilinx -family xc7 -noiopad` run produces these
+mapped-resource baselines for the generated widths. The JSON-based script
+counts the final design once and reports primitive LUT types separately:
+
+| Design | LUTs | CARRY4 | FF | Mapped cells |
+| --- | ---: | ---: | ---: | ---: |
+| Ripple Carry Adder | 64 | 0 | 0 | 96 |
+| Flat Carry Lookahead Adder | 318 | 0 | 0 | 368 |
+| Hierarchical Carry Lookahead Adder | 98 | 0 | 0 | 116 |
+| Simple Multiplier | 638 | 8 | 0 | 880 |
+| Booth Multiplier | 566 | 16 | 0 | 725 |
+| Booth-Wallace Multiplier | 715 | 16 | 0 | 859 |
+| Registered Ripple Carry Adder | 64 | 0 | 98 | 196 |
+| Registered Flat Carry Lookahead Adder | 318 | 0 | 98 | 481 |
+| Registered Hierarchical Carry Lookahead Adder | 98 | 0 | 98 | 216 |
+| Registered Simple Multiplier | 638 | 8 | 64 | 946 |
+| Registered Booth Multiplier | 566 | 16 | 64 | 791 |
+| Registered Booth-Wallace Multiplier | 715 | 16 | 64 | 925 |
+
+These are flattened Yosys XC7-mapped resource counts with top-level I/O pads
+excluded, not Vivado timing, Fmax, power, or a claim that one architecture is
+faster. The result shows the hierarchical CLA using substantially fewer mapped
+LUTs than the flat CLA, while the Booth-Wallace path uses more mapped resources
+than Booth alone. Registered wrappers add storage for fair timing experiments;
+they are not intended as the final CPU interface.
+
 ## Roadmap
 
-- Install Verilator and Yosys, then lint and synthesize generated RTL.
-- Add Python-to-Verilator differential tests and record benchmark results.
+- Increase differential vector coverage and extend the comparison to telemetry.
+- Add Vivado/Artix-7 timing, Fmax, and power measurements if the target board
+   or Vivado environment is available.
 - Reuse the ALU in Objective 2's RISC-V processor and control path.
 - Connect hardware telemetry to the shared cross-layer control plane.
 - Extend AgentOS with tool mediation, signed identities, quotas, and sandboxing.

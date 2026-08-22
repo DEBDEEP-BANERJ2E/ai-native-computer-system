@@ -2,7 +2,7 @@ package objective01.datapath
 
 import chisel3._
 import chisel3.util._
-import objective01.arithmetic.{BoothWallaceMultiplier, CarryLookaheadAdder}
+import objective01.arithmetic.{BoothWallaceMultiplier, HierarchicalCarryLookaheadAdder}
 
 object ALUOpcode {
   val ADD = 0.U(4.W)
@@ -36,8 +36,8 @@ class ALU(val width: Int) extends Module {
   })
 
   private val shiftWidth = log2Ceil(width)
-  val adder = Module(new CarryLookaheadAdder(width))
-  val subtractor = Module(new CarryLookaheadAdder(width))
+  val adder = Module(new HierarchicalCarryLookaheadAdder(width))
+  val subtractor = Module(new HierarchicalCarryLookaheadAdder(width))
   val multiplier = Module(new BoothWallaceMultiplier(width + (width % 2)))
 
   adder.io.a := io.a
