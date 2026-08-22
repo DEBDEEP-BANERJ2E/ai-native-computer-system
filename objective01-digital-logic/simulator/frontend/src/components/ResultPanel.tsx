@@ -1,0 +1,8 @@
+import { Binary, Hash, Square } from "lucide-react";
+import type { SimulationResponse } from "../types";
+
+function hex(value: number) { return `0x${(value >>> 0).toString(16).padStart(8, "0").toUpperCase()}`; }
+export function ResultPanel({ response }: { response: SimulationResponse }) {
+  const flags: [string, boolean][] = [["ZERO", response.zero], ["NEGATIVE", response.negative], ["CARRY", response.carry], ["OVERFLOW", response.overflow]];
+  return <section className="panel result-panel"><div className="panel-heading"><div><span className="kicker">VERILATOR OUTPUT</span><h2>Result</h2></div><span className="source-tag">GENERATED RTL</span></div><div className="result-hero"><span>HEX RESULT</span><strong>{hex(response.result)}</strong></div><div className="representations"><div><Hash size={14} /><span>DECIMAL</span><strong>{response.result >>> 0}</strong></div><div><Binary size={14} /><span>BINARY</span><strong>{(response.result >>> 0).toString(2).padStart(32, "0")}</strong></div></div><div className="flags"><span className="flags-label">STATUS FLAGS</span><div className="flag-row">{flags.map(([name, value]) => <div className={`flag ${value ? "on" : ""}`} key={name}><i /><span>{name}</span><b>{value ? "1" : "0"}</b></div>)}</div></div><div className="protocol"><span><Square size={11} fill="currentColor" /> busy {response.busy ? "1" : "0"}</span><span>done {response.done ? "1" : "0"}</span><span>valid {response.valid ? "1" : "0"}</span></div></section>;
+}

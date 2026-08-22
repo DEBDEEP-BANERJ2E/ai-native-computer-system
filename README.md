@@ -245,7 +245,25 @@ SVG, PNG, and VCD artifacts are kept separate from the source design.
 
 ## Source Documents
 
-- `Computer_System_Project_10_Objectives_Undergraduate_Guide.docx` contains the
   ten objectives, minimum viable versions, suggested tools, and evaluation
   guidance.
-- `project_idea.pdf` contains the broader project proposal and research basis.
+
+## Interactive Workbench
+
+The RTL-backed workbench runs as two local processes. Start the backend first,
+then the Vite frontend in a second terminal:
+
+```bash
+cd objective01-digital-logic
+bash simulator/build_simulator.sh
+python -m uvicorn simulator.backend.app:app --host 127.0.0.1 --port 8000
+```
+
+```bash
+npm --prefix objective01-digital-logic/simulator/frontend install
+npm --prefix objective01-digital-logic/simulator/frontend run dev -- --host 127.0.0.1
+```
+
+Open `http://127.0.0.1:5173/`. The browser sends operands and opcodes to
+FastAPI; FastAPI forwards them to the persistent `objective1_sim` process.
+Results are never recomputed in the browser.

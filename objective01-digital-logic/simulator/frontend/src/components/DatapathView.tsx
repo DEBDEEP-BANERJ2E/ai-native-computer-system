@@ -1,0 +1,7 @@
+import { ArrowRight, CircuitBoard, GitBranch } from "lucide-react";
+import type { Operation } from "../types";
+
+export function DatapathView({ operation }: { operation: Operation }) {
+  const isMul = operation.opcode === 10; const isAdd = operation.opcode < 2; const isShift = operation.opcode >= 5 && operation.opcode <= 7;
+  return <section className="panel datapath-panel"><div className="panel-heading"><div><span className="kicker">RTL DATAPATH</span><h2>Live execution path</h2></div><CircuitBoard size={20} className="heading-icon" /></div><div className="path-canvas"><div className="port port-a">A</div><div className="wire wire-a" /><div className="port port-b">B</div><div className="wire wire-b" /><div className={`unit alu-unit ${isAdd || isMul || isShift ? "active" : ""}`}><strong>ALU</strong><span>32-bit datapath</span></div><ArrowRight className="arrow arrow-main" size={18} /><div className={`unit child-unit ${isMul ? "active orange" : isAdd ? "active green" : ""}`}><GitBranch size={17} /><strong>{operation.unit}</strong><span>{isMul ? "Radix-4 + CSA" : isAdd ? "8 × CLA4 blocks" : isShift ? "logical / arithmetic" : "bitwise fabric"}</span></div><div className="result-node"><span>RESULT</span><strong>OUT</strong></div></div><div className="path-legend"><span><i className="legend-active" /> active RTL path</span><span><i className="legend-dim" /> inactive units</span><span className="path-op">opcode {operation.opcode.toString().padStart(2, "0")} · {operation.label}</span></div></section>;
+}

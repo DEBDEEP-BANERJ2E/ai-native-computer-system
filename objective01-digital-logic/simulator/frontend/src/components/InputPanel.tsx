@@ -1,0 +1,8 @@
+import { Play, RotateCcw } from "lucide-react";
+import { OPERATIONS } from "../types";
+
+type Props = { a: string; b: string; opcode: number; disabled: boolean; onA: (value: string) => void; onB: (value: string) => void; onOpcode: (value: number) => void; onExecute: () => void; onReset: () => void };
+
+export function InputPanel({ a, b, opcode, disabled, onA, onB, onOpcode, onExecute, onReset }: Props) {
+  return <section className="panel input-panel"><div className="panel-heading"><div><span className="kicker">CONTROL SURFACE</span><h2>Operands</h2></div><span className="panel-index">01 / 06</span></div><label>Operand A<input value={a} onChange={(event) => onA(event.target.value.toUpperCase().replace(/[^0-9A-F]/g, "").slice(0, 8))} maxLength={8} /><small>32-bit hexadecimal</small></label><label>Operand B<input value={b} onChange={(event) => onB(event.target.value.toUpperCase().replace(/[^0-9A-F]/g, "").slice(0, 8))} maxLength={8} /><small>32-bit hexadecimal</small></label><label>Operation<select value={opcode} onChange={(event) => onOpcode(Number(event.target.value))}>{OPERATIONS.map((item) => <option key={item.opcode} value={item.opcode}>{item.label} · {item.unit}</option>)}</select></label><div className="button-row"><button className="primary-button" onClick={onExecute} disabled={disabled}><Play size={16} fill="currentColor" /> {disabled ? "RUNNING" : "EXECUTE"}</button><button className="icon-button" onClick={onReset} disabled={disabled} title="Reset telemetry and simulation state"><RotateCcw size={17} /></button></div><div className="source-note"><span className="live-dot" /> Persistent Verilator process<br /><span className="muted">No browser-side arithmetic</span></div></section>;
+}
