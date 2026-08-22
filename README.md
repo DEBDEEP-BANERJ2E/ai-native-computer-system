@@ -134,6 +134,9 @@ bash verification/yosys_stats.sh
 # Xilinx 7-series mapped resource statistics as CSV
 bash verification/yosys_xc7_stats.sh
 
+# Differentially compare Python ALU results with Verilator RTL execution
+python verification/python_verilator_alu.py
+
 # Run the Python golden models
 cd reference
 python -m unittest test_models.py -v
@@ -169,7 +172,7 @@ the Booth-Wallace path uses more mapped resources than Booth alone.
 
 ## Roadmap
 
-- Add Python-to-Verilator differential tests for shared input vectors.
+- Increase differential vector coverage and extend the comparison to telemetry.
 - Add Vivado/Artix-7 timing, Fmax, and power measurements if the target board
    or Vivado environment is available.
 - Reuse the ALU in Objective 2's RISC-V processor and control path.
