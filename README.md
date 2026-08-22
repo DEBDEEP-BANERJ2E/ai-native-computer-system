@@ -137,6 +137,9 @@ bash verification/yosys_xc7_stats.sh
 # Differentially compare Python ALU results with Verilator RTL execution
 python verification/python_verilator_alu.py
 
+# On a Vivado-capable machine, run Artix-7 reports
+vivado -mode batch -source verification/vivado/run_vivado.tcl
+
 # Run the Python golden models
 cd reference
 python -m unittest test_models.py -v
@@ -152,6 +155,12 @@ The generated benchmark tops support these comparisons:
 
 Yosys provides structural comparison. Vivado remains authoritative for
 Artix-7 timing, FPGA resources, and power estimates.
+
+The Vivado flow is prepared for part `xc7a100tcsg324-1`, with a placeholder
+10 ns clock constraint. The actual Nexys A7 clock package pin must be filled in
+from the board's master XDC before trusting timing results. Vivado is not
+installed in the current macOS environment, so no FPGA timing or power result
+is claimed yet.
 
 The first `synth_xilinx -family xc7` run produced mapped-resource baselines for
 the current generated widths:
