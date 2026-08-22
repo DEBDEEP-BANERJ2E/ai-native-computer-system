@@ -23,6 +23,6 @@ objective01-digital-logic/obj_dir/
 objective01-digital-logic/test_run_dir/
 objective01-digital-logic/verification/yosys_stats.txt
 objective01-digital-logic/verification/yosys_xc7_stats.csv
-objective01-digital-logic/verification/vivado/vivado-project/
+objective01-digital-logic/nextpnr-results/
 Computer_System_Project_10_Objectives_Undergraduate_Guide.docx
 project_idea.pdf

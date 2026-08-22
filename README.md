@@ -74,8 +74,8 @@ The supplied undergraduate guide defines ten connected objectives:
 
 ## Objective 1 Design
 
-Objective 1 will grow progressively from verified functional blocks to optimized
-arithmetic, telemetry, synthesis, and FPGA deployment:
+Objective 1 grows progressively from verified functional blocks to optimized
+arithmetic, telemetry, and open-source FPGA-flow evaluation:
 
 1. Reversible gates and supporting mux/register blocks
 2. Ripple-carry baseline and parameterized carry-lookahead adder
@@ -116,9 +116,9 @@ and ChiselTest 0.6.0. Python 3.9 or newer remains available for golden models
 and analysis.
 
 The current checks are ChiselTest simulation, Python golden-model verification,
-and Chisel SystemVerilog generation. Generated SystemVerilog files are ignored
-because they are build artifacts. Verilator and Yosys are used for independent
-RTL simulation, linting, and structural synthesis analysis.
+Chisel SystemVerilog generation, Verilator simulation/linting, and Yosys
+structural/XC7 mapping. Generated SystemVerilog files are ignored because they
+are build artifacts.
 
 ```bash
 cd objective01-digital-logic
@@ -138,8 +138,8 @@ bash verification/yosys_xc7_stats.sh
 # Differentially compare Python ALU results with Verilator RTL execution
 python verification/python_verilator_alu.py
 
-# On a Vivado-capable machine, run Artix-7 reports
-vivado -mode batch -source verification/vivado/run_vivado.tcl
+# On a machine with nextpnr-Xilinx and a Project X-Ray XC7 chip database
+bash verification/nextpnr_xilinx/run_nextpnr.sh /path/to/xc7a100t.chipdb
 
 # Run the Python golden models
 cd reference
@@ -154,14 +154,13 @@ The generated benchmark tops support these comparisons:
 - Simple multiplier versus Booth versus Booth-Wallace
 - ALU without telemetry versus the integrated ALU/telemetry subsystem
 
-Yosys provides structural comparison. Vivado remains authoritative for
-Artix-7 timing, FPGA resources, and power estimates.
+Yosys provides flattened XC7 resource estimates, while nextpnr-Xilinx provides
+the open-source placement, routing, and timing stage when a matching Project
+X-Ray chip database is available.
 
-The Vivado flow is prepared for part `xc7a100tcsg324-1`, with a placeholder
-10 ns clock constraint. The actual Nexys A7 clock package pin must be filled in
-from the board's master XDC before trusting timing results. Vivado is not
-installed in the current macOS environment, so no FPGA timing or power result
-is claimed yet.
+The nextpnr flow targets the Artix-7 100T class with a 100 MHz constraint. A
+matching Project X-Ray chip database is required. No physical Nexys A7 demo is
+planned; board deployment is explicitly outside this project's scope.
 
 The current flattened `synth_xilinx -family xc7 -noiopad` run produces these
 mapped-resource baselines for the generated widths. The JSON-based script
@@ -183,7 +182,7 @@ counts the final design once and reports primitive LUT types separately:
 | Registered Booth-Wallace Multiplier | 715 | 16 | 64 | 925 |
 
 These are flattened Yosys XC7-mapped resource counts with top-level I/O pads
-excluded, not Vivado timing, Fmax, power, or a claim that one architecture is
+excluded, not nextpnr timing, Fmax, power, or a claim that one architecture is
 faster. The result shows the hierarchical CLA using substantially fewer mapped
 LUTs than the flat CLA, while the Booth-Wallace path uses more mapped resources
 than Booth alone. Registered wrappers add storage for fair timing experiments;
@@ -192,8 +191,9 @@ they are not intended as the final CPU interface.
 ## Roadmap
 
 - Increase differential vector coverage and extend the comparison to telemetry.
-- Add Vivado/Artix-7 timing, Fmax, and power measurements if the target board
-   or Vivado environment is available.
+- Run nextpnr-Xilinx placement, routing, and timing using a matching Project
+   X-Ray database if that open-source database environment is available.
+- Treat physical Nexys A7 deployment as out of scope.
 - Reuse the ALU in Objective 2's RISC-V processor and control path.
 - Connect hardware telemetry to the shared cross-layer control plane.
 - Extend AgentOS with tool mediation, signed identities, quotas, and sandboxing.
