@@ -15,6 +15,7 @@ building blocks implemented under `objective01-digital-logic/`:
 - Parameterized register and logical/arithmetic shifter
 - Parameterized ripple-carry adder with carry-in and carry-out
 - Parameterized carry-lookahead adder, including a 32-bit configuration
+- Flat and hierarchical (4-bit block) carry-lookahead adders
 - Parameterized unsigned shift-and-add multiplier baseline
 - Signed Radix-4 Booth multiplier
 - Wallace-style carry-save reduction tree
@@ -24,6 +25,7 @@ building blocks implemented under `objective01-digital-logic/`:
 - Memory-mapped telemetry block with switching and EDP proxy counters
 - Python golden models for arithmetic, ALU, and telemetry behavior
 - Chisel SystemVerilog generation for individual benchmark targets and the integrated subsystem
+- Artix-7-oriented Yosys mapping statistics workflow
 - Exhaustive truth-table tests for both reversible gates
 - ChiselTest coverage for both muxes
 - Exhaustive 8-bit addition coverage for the ripple-carry baseline
@@ -129,6 +131,9 @@ bash verification/verilator_lint.sh
 # Structural Yosys statistics for each generated benchmark top
 bash verification/yosys_stats.sh
 
+# Xilinx 7-series mapped resource statistics as CSV
+bash verification/yosys_xc7_stats.sh
+
 # Run the Python golden models
 cd reference
 python -m unittest test_models.py -v
@@ -145,10 +150,28 @@ The generated benchmark tops support these comparisons:
 Yosys provides structural comparison. Vivado remains authoritative for
 Artix-7 timing, FPGA resources, and power estimates.
 
+The first `synth_xilinx -family xc7` run produced mapped-resource baselines for
+the current generated widths:
+
+| Design | LUTs | CARRY4 | Mapped cells |
+| --- | ---: | ---: | ---: |
+| Ripple Carry Adder | 130 | 0 | 164 |
+| Flat Carry Lookahead Adder | 636 | 0 | 468 |
+| Hierarchical Carry Lookahead Adder | 217 | 0 | 208 |
+| Simple Multiplier | 1276 | 16 | 946 |
+| Booth Multiplier | 1132 | 32 | 791 |
+| Booth-Wallace Multiplier | 1936 | 45 | 962 |
+
+These are Yosys XC7-mapped resource counts, not Vivado timing, Fmax, power,
+or a claim that one architecture is faster. The result currently shows the
+hierarchical CLA using substantially fewer mapped LUTs than the flat CLA, while
+the Booth-Wallace path uses more mapped resources than Booth alone.
+
 ## Roadmap
 
-- Install Verilator and Yosys, then lint and synthesize generated RTL.
-- Add Python-to-Verilator differential tests and record benchmark results.
+- Add Python-to-Verilator differential tests for shared input vectors.
+- Add Vivado/Artix-7 timing, Fmax, and power measurements if the target board
+   or Vivado environment is available.
 - Reuse the ALU in Objective 2's RISC-V processor and control path.
 - Connect hardware telemetry to the shared cross-layer control plane.
 - Extend AgentOS with tool mediation, signed identities, quotas, and sandboxing.

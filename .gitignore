@@ -20,4 +20,6 @@ __pycache__/
 .sim/
 objective01-digital-logic/generated/
 objective01-digital-logic/obj_dir/
+objective01-digital-logic/test_run_dir/
 objective01-digital-logic/verification/yosys_stats.txt
+objective01-digital-logic/verification/yosys_xc7_stats.csv
