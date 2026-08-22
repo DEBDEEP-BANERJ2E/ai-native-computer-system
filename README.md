@@ -194,11 +194,31 @@ they are not intended as the final CPU interface.
 - Run nextpnr-Xilinx placement, routing, and timing using a matching Project
    X-Ray database if that open-source database environment is available.
 - Treat physical Nexys A7 deployment as out of scope.
-- Reuse the ALU in Objective 2's RISC-V processor and control path.
-- Connect hardware telemetry to the shared cross-layer control plane.
-- Extend AgentOS with tool mediation, signed identities, quotas, and sandboxing.
-- Implement and evaluate the remaining OS, compiler, memory, database, network,
-  and security objectives incrementally.
+
+Objective 2 is intentionally not started. The current repository freezes
+Objective 1 interfaces while its open-source place-and-route evaluation remains
+environment-dependent.
+
+## Visualization
+
+The `objective01-digital-logic/visualization/` directory is documentation-only;
+it does not alter the frozen RTL or existing tests. It contains schematics
+generated from Chisel-produced SystemVerilog, Verilator VCD waveform benches,
+an overview architecture diagram, and charts generated from the corrected Yosys
+XC7 CSV.
+
+```bash
+cd objective01-digital-logic
+sbt "runMain GenerateRTL"
+bash visualization/scripts/generate_schematics.sh
+bash visualization/scripts/generate_architecture.sh
+bash verification/yosys_xc7_stats.sh
+python visualization/scripts/plot_results.py
+bash visualization/scripts/generate_waveforms.sh
+```
+
+The VCD files can be opened with GTKWave, Surfer, or another VCD viewer. DOT,
+SVG, PNG, and VCD artifacts are kept separate from the source design.
 
 ## Source Documents
 

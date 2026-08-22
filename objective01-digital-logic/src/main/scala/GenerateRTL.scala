@@ -1,10 +1,14 @@
 import chisel3.stage.ChiselStage
-import objective01.arithmetic.{BoothMultiplier, BoothWallaceMultiplier, CarryLookaheadAdder, HierarchicalCarryLookaheadAdder, RippleCarryAdder, SimpleMultiplier}
+import objective01.arithmetic.{BoothMultiplier, BoothWallaceMultiplier, CarryLookaheadAdder, HierarchicalCarryLookaheadAdder, RippleCarryAdder, SimpleMultiplier, CLA4}
 import objective01.datapath.ALU
+import objective01.gates.{Fredkin, Toffoli}
 import objective01.telemetry.TelemetryBlock
 
 object GenerateRTL extends App {
   val targetDirectory = "generated"
+  (new ChiselStage).emitSystemVerilog(new Fredkin, Array("--target-dir", targetDirectory))
+  (new ChiselStage).emitSystemVerilog(new Toffoli, Array("--target-dir", targetDirectory))
+  (new ChiselStage).emitSystemVerilog(new CLA4, Array("--target-dir", targetDirectory))
   (new ChiselStage).emitSystemVerilog(new RippleCarryAdder(32), Array("--target-dir", targetDirectory))
   (new ChiselStage).emitSystemVerilog(new CarryLookaheadAdder(32), Array("--target-dir", targetDirectory))
   (new ChiselStage).emitSystemVerilog(new HierarchicalCarryLookaheadAdder(32), Array("--target-dir", targetDirectory))

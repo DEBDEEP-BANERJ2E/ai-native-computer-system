@@ -1,0 +1,21 @@
+digraph Objective1 {
+  rankdir=LR;
+  graph [bgcolor="white", pad="0.25", nodesep="0.55", ranksep="0.8"];
+  node [shape=box, style="rounded,filled", fontname="Helvetica", color="#31587a", fillcolor="#edf4f8"];
+  edge [color="#4d8b78", penwidth=1.5, arrowsize=0.8];
+
+  inputs [label="Operands + opcode", fillcolor="#f4eee7", color="#b56b45"];
+  alu [label="32-bit ALU\nADD / SUB / logic / shifts / compare / MUL"];
+  cla [label="Hierarchical CLA\n8 x CLA4 blocks", fillcolor="#e7f1ed", color="#4d8b78"];
+  mul [label="Booth-Wallace\nRadix-4 rows + CSA reduction", fillcolor="#e7f1ed", color="#4d8b78"];
+  telemetry [label="Telemetry monitor\noperation count\nswitching proxy\nEDP proxy", fillcolor="#f4eee7", color="#b56b45"];
+  registers [label="MMIO register map\n0x80001000 - 0x80001010"];
+  objective2 [label="Objective 2 interface", fillcolor="#f4eee7", color="#b56b45"];
+
+  inputs -> alu;
+  cla -> alu [label="add / subtract"];
+  mul -> alu [label="multiply"];
+  alu -> telemetry [label="result + operation event"];
+  telemetry -> registers;
+  registers -> objective2;
+}
