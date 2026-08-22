@@ -26,6 +26,7 @@ building blocks implemented under `objective01-digital-logic/`:
 - Python golden models for arithmetic, ALU, and telemetry behavior
 - Chisel SystemVerilog generation for individual benchmark targets and the integrated subsystem
 - Artix-7-oriented Yosys mapping statistics workflow
+- Registered timing wrappers for fair adder and multiplier comparisons
 - Exhaustive truth-table tests for both reversible gates
 - ChiselTest coverage for both muxes
 - Exhaustive 8-bit addition coverage for the ripple-carry baseline
@@ -131,7 +132,7 @@ bash verification/verilator_lint.sh
 # Structural Yosys statistics for each generated benchmark top
 bash verification/yosys_stats.sh
 
-# Xilinx 7-series mapped resource statistics as CSV
+# Flattened, no-I/O-pad Xilinx 7-series mapped resource statistics as CSV
 bash verification/yosys_xc7_stats.sh
 
 # Differentially compare Python ALU results with Verilator RTL execution
@@ -162,22 +163,31 @@ from the board's master XDC before trusting timing results. Vivado is not
 installed in the current macOS environment, so no FPGA timing or power result
 is claimed yet.
 
-The first `synth_xilinx -family xc7` run produced mapped-resource baselines for
-the current generated widths:
+The current flattened `synth_xilinx -family xc7 -noiopad` run produces these
+mapped-resource baselines for the generated widths. The JSON-based script
+counts the final design once and reports primitive LUT types separately:
 
-| Design | LUTs | CARRY4 | Mapped cells |
-| --- | ---: | ---: | ---: |
-| Ripple Carry Adder | 130 | 0 | 164 |
-| Flat Carry Lookahead Adder | 636 | 0 | 468 |
-| Hierarchical Carry Lookahead Adder | 217 | 0 | 208 |
-| Simple Multiplier | 1276 | 16 | 946 |
-| Booth Multiplier | 1132 | 32 | 791 |
-| Booth-Wallace Multiplier | 1936 | 45 | 962 |
+| Design | LUTs | CARRY4 | FF | Mapped cells |
+| --- | ---: | ---: | ---: | ---: |
+| Ripple Carry Adder | 64 | 0 | 0 | 96 |
+| Flat Carry Lookahead Adder | 318 | 0 | 0 | 368 |
+| Hierarchical Carry Lookahead Adder | 98 | 0 | 0 | 116 |
+| Simple Multiplier | 638 | 8 | 0 | 880 |
+| Booth Multiplier | 566 | 16 | 0 | 725 |
+| Booth-Wallace Multiplier | 715 | 16 | 0 | 859 |
+| Registered Ripple Carry Adder | 64 | 0 | 98 | 196 |
+| Registered Flat Carry Lookahead Adder | 318 | 0 | 98 | 481 |
+| Registered Hierarchical Carry Lookahead Adder | 98 | 0 | 98 | 216 |
+| Registered Simple Multiplier | 638 | 8 | 64 | 946 |
+| Registered Booth Multiplier | 566 | 16 | 64 | 791 |
+| Registered Booth-Wallace Multiplier | 715 | 16 | 64 | 925 |
 
-These are Yosys XC7-mapped resource counts, not Vivado timing, Fmax, power,
-or a claim that one architecture is faster. The result currently shows the
-hierarchical CLA using substantially fewer mapped LUTs than the flat CLA, while
-the Booth-Wallace path uses more mapped resources than Booth alone.
+These are flattened Yosys XC7-mapped resource counts with top-level I/O pads
+excluded, not Vivado timing, Fmax, power, or a claim that one architecture is
+faster. The result shows the hierarchical CLA using substantially fewer mapped
+LUTs than the flat CLA, while the Booth-Wallace path uses more mapped resources
+than Booth alone. Registered wrappers add storage for fair timing experiments;
+they are not intended as the final CPU interface.
 
 ## Roadmap
 
