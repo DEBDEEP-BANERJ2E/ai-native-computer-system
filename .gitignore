@@ -26,6 +26,8 @@ objective01-digital-logic/verification/yosys_xc7_stats.csv
 objective01-digital-logic/nextpnr-results/
 objective01-digital-logic/visualization/waveforms/ALUWaveform_tb
 objective01-digital-logic/visualization/waveforms/TelemetryWaveform_tb
+objective01-digital-logic/simulator/objective1_sim
+objective01-digital-logic/obj_dir/objective1_sim/
 !objective01-digital-logic/visualization/waveforms/alu_operations.vcd
 !objective01-digital-logic/visualization/waveforms/telemetry.vcd
 Computer_System_Project_10_Objectives_Undergraduate_Guide.docx

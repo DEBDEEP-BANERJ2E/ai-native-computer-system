@@ -144,7 +144,30 @@ bash verification/nextpnr_xilinx/run_nextpnr.sh /path/to/xc7a100t.chipdb
 # Run the Python golden models
 cd reference
 python -m unittest test_models.py -v
+
+# Build and test the persistent RTL-backed simulator
+cd ..
+bash simulator/build_simulator.sh
+python -m unittest simulator.test_objective1_sim -v
 ```
+
+### RTL-Backed Simulator
+
+The simulator is a persistent JSON Lines process backed by the generated
+`Objective1Subsystem.sv`, not a JavaScript or Python ALU reimplementation. One
+`execute` request advances one clock cycle and returns the ALU result, flags,
+protocol signals, the requested telemetry value, and all five telemetry
+registers. A `reset` request clears the synchronous telemetry state.
+
+Example:
+
+```json
+{"command":"execute","a":5,"b":3,"opcode":0,"operation_valid":true,"telemetry_address":2147487748}
+```
+
+The process returns one JSON object per input line. `busy` is currently `false`,
+`done` is `true`, and `valid` follows `operation_valid`, matching the frozen
+combinational Objective 1 protocol.
 
 ## Benchmark Plan
 
