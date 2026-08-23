@@ -203,6 +203,34 @@ class DecoderSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers {
     }
   }
 
+  it should "decode all 8 RV32M instructions when enableFullM = true" in {
+    test(new Decoder(enableFullM = true)) { dut =>
+      val mTests = Seq(
+        ("h02C58533", MOp.MUL,    "MUL"),
+        ("h02C59533", MOp.MULH,   "MULH"),
+        ("h02C5A533", MOp.MULHSU, "MULHSU"),
+        ("h02C5B533", MOp.MULHU,  "MULHU"),
+        ("h02C5C533", MOp.DIV,    "DIV"),
+        ("h02C5D533", MOp.DIVU,   "DIVU"),
+        ("h02C5E533", MOp.REM,    "REM"),
+        ("h02C5F533", MOp.REMU,   "REMU")
+      )
+
+      for ((hex, mOp, name) <- mTests) {
+        dut.io.instruction.poke(hex.U)
+        dut.io.controls.mOp.expect(mOp, s"$name: mOp mismatch")
+        dut.io.controls.regWrite.expect(true.B, s"$name: regWrite should be true")
+        dut.io.controls.illegalInstruction.expect(false.B, s"$name: should not be illegal")
+
+        if (name.startsWith("MUL")) {
+          dut.io.controls.isMul.expect(true.B, s"$name: isMul should be true")
+        } else {
+          dut.io.controls.isMul.expect(false.B, s"$name: isMul should be false")
+        }
+      }
+    }
+  }
+
   it should "comprehensively reject illegal instructions with zero side effects" in {
     test(new Decoder) { dut =>
       // 1. Invalid R-type funct7 (0x05) on ADD
@@ -233,10 +261,10 @@ class DecoderSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers {
       verifyIllegal(dut, "h000110E7", "Invalid JALR with funct3=1")
 
       // 10. Unsupported M-extension DIV (funct7=0x01, funct3=4)
-      verifyIllegal(dut, "h02C5C533", "Unsupported M-extension DIV (pending Phase 5)")
+      verifyIllegal(dut, "h02C5C533", "Unsupported M-extension DIV")
 
       // 11. Unsupported M-extension MULH (funct7=0x01, funct3=1)
-      verifyIllegal(dut, "h02C59533", "Unsupported M-extension MULH (pending Phase 5)")
+      verifyIllegal(dut, "h02C59533", "Unsupported M-extension MULH")
 
       // 12. Unsupported SYSTEM instruction (ECALL / CSR: 0x73)
       verifyIllegal(dut, "h00000073", "Unsupported SYSTEM ECALL opcode 0x73")

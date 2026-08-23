@@ -85,9 +85,9 @@ class Decoder(val enableFullM: Boolean = false) extends Module {
           ctrl.mOp   := MOp.MUL
         }.elsewhen(enableFullM.B) {
           switch(f3) {
-            is(FUNCT3_MULH)   { ctrl.mOp := MOp.MULH }
-            is(FUNCT3_MULHSU) { ctrl.mOp := MOp.MULHSU }
-            is(FUNCT3_MULHU)  { ctrl.mOp := MOp.MULHU }
+            is(FUNCT3_MULH)   { ctrl.mOp := MOp.MULH; ctrl.isMul := true.B }
+            is(FUNCT3_MULHSU) { ctrl.mOp := MOp.MULHSU; ctrl.isMul := true.B }
+            is(FUNCT3_MULHU)  { ctrl.mOp := MOp.MULHU; ctrl.isMul := true.B }
             is(FUNCT3_DIV)    { ctrl.mOp := MOp.DIV }
             is(FUNCT3_DIVU)   { ctrl.mOp := MOp.DIVU }
             is(FUNCT3_REM)    { ctrl.mOp := MOp.REM }

@@ -430,13 +430,30 @@ class PipelinedCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Matc
   // -------------------------------------------------------------
   // Test 5: RV32M Divider Multi-cycle Pipeline Integration
   // -------------------------------------------------------------
-  it should "stall pipeline correctly during division and forward quotient/remainder" in {
+  it should "execute all eight RV32M instructions including high-multiply variants and divider immediate forwarding" in {
     val progDiv = Seq(
-      BigInt("00a00093", 16), // 0x00: addi x1, x0, 10
+      BigInt("ffe00093", 16), // 0x00: addi x1, x0, -2
       BigInt("00300113", 16), // 0x04: addi x2, x0, 3
-      BigInt("0220c1b3", 16), // 0x08: div  x3, x1, x2 (30-34 cycles, x3 = 3)
-      BigInt("0220e233", 16), // 0x0C: rem  x4, x1, x2 (x4 = 1)
-      BigInt("003182b3", 16)  // 0x10: add  x5, x3, x3 (x5 = 6)
+      BigInt("022091b3", 16), // 0x08: mulh x3, x1, x2 (x3 = 0xFFFFFFFF)
+      BigInt("ffe00093", 16), // 0x0C: addi x1, x0, -2
+      BigInt("fff00113", 16), // 0x10: addi x2, x0, -1
+      BigInt("0220a233", 16), // 0x14: mulhsu x4, x1, x2 (x4 = 0xFFFFFFFE)
+      BigInt("fff00093", 16), // 0x18: addi x1, x0, -1
+      BigInt("fff00113", 16), // 0x1C: addi x2, x0, -1
+      BigInt("0220b2b3", 16), // 0x20: mulhu x5, x1, x2 (x5 = 0xFFFFFFFE)
+      BigInt("00a00093", 16), // 0x24: addi x1, x0, 10
+      BigInt("00300113", 16), // 0x28: addi x2, x0, 3
+      BigInt("0220c333", 16), // 0x2C: div x6, x1, x2 (x6 = 3)
+      BigInt("002303b3", 16), // 0x30: add x7, x6, x2 (x7 = 6) - immediate forwarding
+      BigInt("fff00093", 16), // 0x34: addi x1, x0, -1
+      BigInt("00300113", 16), // 0x38: addi x2, x0, 3
+      BigInt("0220d433", 16), // 0x3C: divu x8, x1, x2 (x8 = 0x55555555)
+      BigInt("00a00093", 16), // 0x40: addi x1, x0, 10
+      BigInt("00300113", 16), // 0x44: addi x2, x0, 3
+      BigInt("0220e4b3", 16), // 0x48: rem x9, x1, x2 (x9 = 1)
+      BigInt("fff00093", 16), // 0x4C: addi x1, x0, -1
+      BigInt("00300113", 16), // 0x50: addi x2, x0, 3
+      BigInt("0220f533", 16)  // 0x54: remu x10, x1, x2 (x10 = 0)
     )
 
     test(new PipelinedCore(initialProgram = progDiv)) { dut =>
@@ -444,7 +461,7 @@ class PipelinedCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Matc
       val retiredVals = scala.collection.mutable.ArrayBuffer[BigInt]()
       val trace = scala.collection.mutable.ArrayBuffer[String]()
 
-      for (_ <- 0 until 100) {
+      for (_ <- 0 until 300) {
         val ret = captureRetirementEvent(dut)
         if (ret.isDefined) {
           retiredPcs += dut.io.commit.pc.peek().litValue
@@ -456,8 +473,37 @@ class PipelinedCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Matc
 
       recordPipelineTrace("progDiv", trace)
 
-      retiredPcs shouldBe Seq(BigInt(0x00), BigInt(0x04), BigInt(0x08), BigInt(0x0C), BigInt(0x10))
-      retiredVals shouldBe Seq(BigInt(10), BigInt(3), BigInt(3), BigInt(1), BigInt(6))
+      val expectedPcs = Seq(
+        0x00, 0x04, 0x08, 0x0C, 0x10, 0x14, 0x18, 0x1C, 0x20, 0x24, 0x28, 0x2C, 0x30, 0x34, 0x38, 0x3C, 0x40, 0x44, 0x48, 0x4C, 0x50, 0x54
+      ).map(BigInt(_))
+
+      val expectedVals = Seq(
+        BigInt("FFFFFFFFFFFFFFFE", 16) & 0xFFFFFFFFL, // x1 = -2
+        BigInt(3), // x2 = 3
+        BigInt("FFFFFFFF", 16), // x3 = -1
+        BigInt("FFFFFFFFFFFFFFFE", 16) & 0xFFFFFFFFL, // x1 = -2
+        BigInt("FFFFFFFFFFFFFFFF", 16) & 0xFFFFFFFFL, // x2 = -1
+        BigInt("FFFFFFFE", 16), // x4 = -2
+        BigInt("FFFFFFFFFFFFFFFF", 16) & 0xFFFFFFFFL, // x1 = -1
+        BigInt("FFFFFFFFFFFFFFFF", 16) & 0xFFFFFFFFL, // x2 = -1
+        BigInt("FFFFFFFE", 16), // x5 = -2
+        BigInt(10), // x1 = 10
+        BigInt(3), // x2 = 3
+        BigInt(3), // x6 = 3
+        BigInt(6), // x7 = 6
+        BigInt("FFFFFFFFFFFFFFFF", 16) & 0xFFFFFFFFL, // x1 = -1
+        BigInt(3), // x2 = 3
+        BigInt("55555555", 16), // x8
+        BigInt(10), // x1 = 10
+        BigInt(3), // x2 = 3
+        BigInt(1), // x9 = 1
+        BigInt("FFFFFFFFFFFFFFFF", 16) & 0xFFFFFFFFL, // x1 = -1
+        BigInt(3), // x2 = 3
+        BigInt(0) // x10 = 0
+      )
+
+      retiredPcs shouldBe expectedPcs
+      retiredVals shouldBe expectedVals
     }
   }
 }

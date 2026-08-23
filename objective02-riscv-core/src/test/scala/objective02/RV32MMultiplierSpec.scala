@@ -64,6 +64,16 @@ class RV32MMultiplierSpec extends AnyFreeSpec with ChiselScalatestTester with Ma
           (0x87654321L, 0x12345678L, "neg x pos mixed")
         )
 
+        // Add deterministic pseudo-random test vectors
+        val rand = new scala.util.Random(1337)
+        val randCases = (1 to 100).map { i =>
+          val r1 = rand.nextLong() & 0xFFFFFFFFL
+          val r2 = rand.nextLong() & 0xFFFFFFFFL
+          (r1, r2, s"random case $i")
+        }
+
+        val allCases = cases ++ randCases
+
         val ops = Seq(
           (MOp.MUL, "MUL"),
           (MOp.MULH, "MULH"),
@@ -71,7 +81,7 @@ class RV32MMultiplierSpec extends AnyFreeSpec with ChiselScalatestTester with Ma
           (MOp.MULHU, "MULHU")
         )
 
-        for ((rs1, rs2, desc) <- cases) {
+        for ((rs1, rs2, desc) <- allCases) {
           for ((op, opName) <- ops) {
             testMultiplication(dut, rs1, rs2, op, s"$opName for $desc")
           }

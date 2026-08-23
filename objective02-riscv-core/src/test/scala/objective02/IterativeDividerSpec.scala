@@ -71,7 +71,20 @@ class IterativeDividerSpec extends AnyFreeSpec with ChiselScalatestTester with M
           (0x80000000L, 0xFFFFFFFFL, false, "unsigned no overflow")
         )
 
-        for ((dividend, divisor, isSigned, desc) <- cases) {
+        // Add deterministic pseudo-random test vectors
+        val rand = new scala.util.Random(1337)
+        val randCases = (1 to 100).flatMap { i =>
+          val r1 = rand.nextLong() & 0xFFFFFFFFL
+          val r2 = rand.nextLong() & 0xFFFFFFFFL
+          Seq(
+            (r1, r2, true, s"random case $i signed"),
+            (r1, r2, false, s"random case $i unsigned")
+          )
+        }
+
+        val allCases = cases ++ randCases
+
+        for ((dividend, divisor, isSigned, desc) <- allCases) {
           testDivision(dut, dividend, divisor, isSigned, desc)
         }
       }

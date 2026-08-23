@@ -63,13 +63,13 @@ object ALUOps {
 object MOp {
   val NONE   = 0.U(4.W) // Not an M-extension operation
   val MUL    = 1.U(4.W) // Signed 32x32 -> lower 32-bit (Objective 1 Booth-Wallace)
-  val MULH   = 2.U(4.W) // Signed 32x32 -> upper 32-bit (pending Phase 5)
-  val MULHSU = 3.U(4.W) // Signed x Unsigned -> upper 32-bit (pending Phase 5)
-  val MULHU  = 4.U(4.W) // Unsigned x Unsigned -> upper 32-bit (pending Phase 5)
-  val DIV    = 5.U(4.W) // Signed division (pending Phase 5)
-  val DIVU   = 6.U(4.W) // Unsigned division (pending Phase 5)
-  val REM    = 7.U(4.W) // Signed remainder (pending Phase 5)
-  val REMU   = 8.U(4.W) // Unsigned remainder (pending Phase 5)
+  val MULH   = 2.U(4.W) // Signed 32x32 -> upper 32-bit
+  val MULHSU = 3.U(4.W) // Signed x Unsigned -> upper 32-bit
+  val MULHU  = 4.U(4.W) // Unsigned x Unsigned -> upper 32-bit
+  val DIV    = 5.U(4.W) // Signed division
+  val DIVU   = 6.U(4.W) // Unsigned division
+  val REM    = 7.U(4.W) // Signed remainder
+  val REMU   = 8.U(4.W) // Unsigned remainder
 }
 
 class ControlSignalsBundle extends Bundle {

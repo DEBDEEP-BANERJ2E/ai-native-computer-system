@@ -106,15 +106,32 @@ ORIGINAL_BENCHMARKS = {
 # =========================================================================
 RV32M_BENCHMARKS = {
     "prog_div": {
-        "name": "Phase 5C RV32M Divider Integration",
+        "name": "Phase 5C RV32M Full Multi-cycle Integration",
         "code": [
-            0x00a00093, # 0x00: addi x1, x0, 10
+            0xffe00093, # 0x00: addi x1, x0, -2
             0x00300113, # 0x04: addi x2, x0, 3
-            0x0220c1b3, # 0x08: div  x3, x1, x2 (3)
-            0x0220e233, # 0x0C: rem  x4, x1, x2 (1)
-            0x003182b3  # 0x10: add  x5, x3, x3 (6)
+            0x022091b3, # 0x08: mulh x3, x1, x2
+            0xffe00093, # 0x0C: addi x1, x0, -2
+            0xfff00113, # 0x10: addi x2, x0, -1
+            0x0220a233, # 0x14: mulhsu x4, x1, x2
+            0xfff00093, # 0x18: addi x1, x0, -1
+            0xfff00113, # 0x1C: addi x2, x0, -1
+            0x0220b2b3, # 0x20: mulhu x5, x1, x2
+            0x00a00093, # 0x24: addi x1, x0, 10
+            0x00300113, # 0x28: addi x2, x0, 3
+            0x0220c333, # 0x2C: div x6, x1, x2
+            0x002303b3, # 0x30: add x7, x6, x2
+            0xfff00093, # 0x34: addi x1, x0, -1
+            0x00300113, # 0x38: addi x2, x0, 3
+            0x0220d433, # 0x3C: divu x8, x1, x2
+            0x00a00093, # 0x40: addi x1, x0, 10
+            0x00300113, # 0x44: addi x2, x0, 3
+            0x0220e4b3, # 0x48: rem x9, x1, x2
+            0xfff00093, # 0x4C: addi x1, x0, -1
+            0x00300113, # 0x50: addi x2, x0, 3
+            0x0220f533  # 0x54: remu x10, x1, x2
         ],
-        "cycles": 5, # retirement events count = 5
+        "cycles": 22, # retirement events count = 22
         "pipe_trace": "test_traces/progDiv.json"
     }
 }
