@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Genuine Cross-Model 3-Way Differential Verification Runner.
-Regenerates and compares cycle-by-cycle architectural commit/retirement traces produced by:
+Regenerates and compares retirement-order architectural commit/retirement traces produced by:
 1. Python reference emulator (RV32Interpreter)
 2. Chisel SingleCycleCore (frozen golden hardware reference)
 3. Chisel PipelinedCore (5-stage pipelined processor core with Data Forwarding and Load-Use Hazard Stalls)
@@ -180,12 +180,20 @@ def compare_event(model_a_name: str, ev_a, model_b_name: str, ev_b, idx: int):
     b_memWrite = ev_b.memWrite if isinstance(ev_b, CommitEvent) else ev_b["memWrite"]
     assert a_memWrite == b_memWrite, f"Event {idx} MemWrite mismatch at PC {hex(a_pc)}"
 
-    if a_memRead or a_memWrite:
+    a_memReadReq = ev_a.memReadReq if isinstance(ev_a, CommitEvent) else ev_a["memReadReq"]
+    b_memReadReq = ev_b.memReadReq if isinstance(ev_b, CommitEvent) else ev_b["memReadReq"]
+    assert a_memReadReq == b_memReadReq, f"Event {idx} MemReadReq mismatch at PC {hex(a_pc)}"
+
+    a_memWriteReq = ev_a.memWriteReq if isinstance(ev_a, CommitEvent) else ev_a["memWriteReq"]
+    b_memWriteReq = ev_b.memWriteReq if isinstance(ev_b, CommitEvent) else ev_b["memWriteReq"]
+    assert a_memWriteReq == b_memWriteReq, f"Event {idx} MemWriteReq mismatch at PC {hex(a_pc)}"
+
+    if a_memReadReq or a_memWriteReq:
         a_addr = ev_a.memAddress if isinstance(ev_a, CommitEvent) else ev_a["memAddress"]
         b_addr = ev_b.memAddress if isinstance(ev_b, CommitEvent) else ev_b["memAddress"]
         assert a_addr == b_addr, f"Event {idx} MemAddress mismatch at PC {hex(a_pc)}: {model_a_name}={hex(a_addr)}, {model_b_name}={hex(b_addr)}"
 
-    if a_memWrite:
+    if a_memWriteReq:
         a_wdata = ev_a.memWriteData if isinstance(ev_a, CommitEvent) else ev_a["memWriteData"]
         b_wdata = ev_b.memWriteData if isinstance(ev_b, CommitEvent) else ev_b["memWriteData"]
         assert (a_wdata & 0xFFFFFFFF) == (b_wdata & 0xFFFFFFFF), f"Event {idx} MemWriteData mismatch at PC {hex(a_pc)}"
@@ -257,6 +265,13 @@ def run_differential_comparison(use_existing_traces: bool = False):
         interp = RV32Interpreter()
         interp.load_program(prog_info["code"])
         py_trace = interp.run(prog_info["cycles"])
+
+        assert len(py_trace) == len(sc_events), (
+            f"Python ({len(py_trace)}) vs SingleCycle ({len(sc_events)}) event count mismatch"
+        )
+        assert len(sc_events) == len(pipe_events), (
+            f"SingleCycle ({len(sc_events)}) vs PipelinedCore ({len(pipe_events)}) retirement count mismatch"
+        )
 
         for i in range(len(py_trace)):
             total_canon_events += 1
