@@ -21,6 +21,7 @@ Desktop.ini
 target/
 project/target/
 project/project/
+test_run_dir/
 .metals/
 .bloop/
 .scala-build/
