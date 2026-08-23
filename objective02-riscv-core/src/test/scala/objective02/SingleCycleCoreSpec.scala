@@ -5,9 +5,22 @@ import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import objective02.core.SingleCycleCore
+import java.io.{File, PrintWriter}
 
 class SingleCycleCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers {
   behavior of "SingleCycleCore"
+
+  // Helper to record commit trace to JSON file for differential verification
+  def recordCommitTrace(progName: String, trace: Seq[String]): Unit = {
+    val dir = new File("test_traces")
+    if (!dir.exists()) dir.mkdirs()
+    val writer = new PrintWriter(new File(s"test_traces/$progName.json"))
+    try {
+      writer.write("[\n" + trace.mkString(",\n") + "\n]\n")
+    } finally {
+      writer.close()
+    }
+  }
 
   // -------------------------------------------------------------
   // Benchmark Program 1: Arithmetic and Logical Matrix
@@ -25,62 +38,25 @@ class SingleCycleCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Ma
     )
 
     test(new SingleCycleCore(initialProgram = prog1)) { dut =>
-      // Cycle 0: addi x1, x0, 10 -> writes 10 to x1
-      dut.io.debugPc.expect("h00".U)
-      dut.io.debugRd.expect(1.U)
-      dut.io.debugRegWrite.expect(true.B)
-      dut.io.debugWriteData.expect(10.U)
-      dut.io.debugIllegal.expect(false.B)
-      dut.clock.step(1)
+      val trace = scala.collection.mutable.ArrayBuffer[String]()
 
-      // Cycle 1: addi x2, x0, 20 -> writes 20 to x2
-      dut.io.debugPc.expect("h04".U)
-      dut.io.debugRd.expect(2.U)
-      dut.io.debugRegWrite.expect(true.B)
-      dut.io.debugWriteData.expect(20.U)
-      dut.clock.step(1)
+      for (cycle <- 0 until 8) {
+        val pc = dut.io.debugPc.peek().litValue
+        val inst = dut.io.debugInstruction.peek().litValue
+        val rd = dut.io.debugRd.peek().litValue
+        val regWrite = dut.io.debugRegWrite.peek().litToBoolean
+        val writeData = dut.io.debugWriteData.peek().litValue
+        val memRead = dut.io.debugMemRead.peek().litToBoolean
+        val memWrite = dut.io.debugMemWrite.peek().litToBoolean
+        val memAddr = dut.io.debugMemAddress.peek().litValue
+        val memWriteData = dut.io.debugMemWriteData.peek().litValue
+        val illegal = dut.io.debugIllegal.peek().litToBoolean
 
-      // Cycle 2: add x3, x1, x2 -> writes 30 to x3
-      dut.io.debugPc.expect("h08".U)
-      dut.io.debugRd.expect(3.U)
-      dut.io.debugRegWrite.expect(true.B)
-      dut.io.debugWriteData.expect(30.U)
-      dut.clock.step(1)
+        trace += s"""  {"pc": $pc, "instruction": $inst, "rd": $rd, "regWrite": $regWrite, "writeData": $writeData, "memRead": $memRead, "memWrite": $memWrite, "memAddress": $memAddr, "memWriteData": $memWriteData, "illegal": $illegal}"""
 
-      // Cycle 3: sub x4, x3, x1 -> writes 20 to x4
-      dut.io.debugPc.expect("h0C".U)
-      dut.io.debugRd.expect(4.U)
-      dut.io.debugRegWrite.expect(true.B)
-      dut.io.debugWriteData.expect(20.U)
-      dut.clock.step(1)
-
-      // Cycle 4: slt x5, x4, x3 -> writes 1 to x5
-      dut.io.debugPc.expect("h10".U)
-      dut.io.debugRd.expect(5.U)
-      dut.io.debugRegWrite.expect(true.B)
-      dut.io.debugWriteData.expect(1.U)
-      dut.clock.step(1)
-
-      // Cycle 5: xor x6, x1, x2 -> writes 30 to x6
-      dut.io.debugPc.expect("h14".U)
-      dut.io.debugRd.expect(6.U)
-      dut.io.debugRegWrite.expect(true.B)
-      dut.io.debugWriteData.expect(30.U)
-      dut.clock.step(1)
-
-      // Cycle 6: or x7, x1, x2 -> writes 30 to x7
-      dut.io.debugPc.expect("h18".U)
-      dut.io.debugRd.expect(7.U)
-      dut.io.debugRegWrite.expect(true.B)
-      dut.io.debugWriteData.expect(30.U)
-      dut.clock.step(1)
-
-      // Cycle 7: and x8, x1, x2 -> writes 0 to x8
-      dut.io.debugPc.expect("h1C".U)
-      dut.io.debugRd.expect(8.U)
-      dut.io.debugRegWrite.expect(true.B)
-      dut.io.debugWriteData.expect(0.U)
-      dut.clock.step(1)
+        dut.clock.step(1)
+      }
+      recordCommitTrace("chisel_trace_prog1", trace)
 
       dut.io.debugPc.expect("h20".U)
     }
@@ -100,37 +76,26 @@ class SingleCycleCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Ma
     )
 
     test(new SingleCycleCore(initialProgram = prog2)) { dut =>
-      // Setup
-      dut.io.debugPc.expect("h00".U); dut.io.debugWriteData.expect(5.U); dut.clock.step(1)
-      dut.io.debugPc.expect("h04".U); dut.io.debugWriteData.expect(0.U); dut.clock.step(1)
+      val trace = scala.collection.mutable.ArrayBuffer[String]()
 
-      // Iteration 1: x2 += 5 (5), x1 -= 1 (4), BNE taken -> 0x08
-      dut.io.debugPc.expect("h08".U); dut.io.debugWriteData.expect(5.U); dut.clock.step(1)
-      dut.io.debugPc.expect("h0C".U); dut.io.debugWriteData.expect(4.U); dut.clock.step(1)
-      dut.io.debugPc.expect("h10".U); dut.clock.step(1)
+      for (cycle <- 0 until 18) {
+        val pc = dut.io.debugPc.peek().litValue
+        val inst = dut.io.debugInstruction.peek().litValue
+        val rd = dut.io.debugRd.peek().litValue
+        val regWrite = dut.io.debugRegWrite.peek().litToBoolean
+        val writeData = dut.io.debugWriteData.peek().litValue
+        val memRead = dut.io.debugMemRead.peek().litToBoolean
+        val memWrite = dut.io.debugMemWrite.peek().litToBoolean
+        val memAddr = dut.io.debugMemAddress.peek().litValue
+        val memWriteData = dut.io.debugMemWriteData.peek().litValue
+        val illegal = dut.io.debugIllegal.peek().litToBoolean
 
-      // Iteration 2: x2 += 4 (9), x1 -= 1 (3), BNE taken -> 0x08
-      dut.io.debugPc.expect("h08".U); dut.io.debugWriteData.expect(9.U); dut.clock.step(1)
-      dut.io.debugPc.expect("h0C".U); dut.io.debugWriteData.expect(3.U); dut.clock.step(1)
-      dut.io.debugPc.expect("h10".U); dut.clock.step(1)
+        trace += s"""  {"pc": $pc, "instruction": $inst, "rd": $rd, "regWrite": $regWrite, "writeData": $writeData, "memRead": $memRead, "memWrite": $memWrite, "memAddress": $memAddr, "memWriteData": $memWriteData, "illegal": $illegal}"""
 
-      // Iteration 3: x2 += 3 (12), x1 -= 1 (2), BNE taken -> 0x08
-      dut.io.debugPc.expect("h08".U); dut.io.debugWriteData.expect(12.U); dut.clock.step(1)
-      dut.io.debugPc.expect("h0C".U); dut.io.debugWriteData.expect(2.U); dut.clock.step(1)
-      dut.io.debugPc.expect("h10".U); dut.clock.step(1)
+        dut.clock.step(1)
+      }
+      recordCommitTrace("chisel_trace_prog2", trace)
 
-      // Iteration 4: x2 += 2 (14), x1 -= 1 (1), BNE taken -> 0x08
-      dut.io.debugPc.expect("h08".U); dut.io.debugWriteData.expect(14.U); dut.clock.step(1)
-      dut.io.debugPc.expect("h0C".U); dut.io.debugWriteData.expect(1.U); dut.clock.step(1)
-      dut.io.debugPc.expect("h10".U); dut.clock.step(1)
-
-      // Iteration 5: x2 += 1 (15), x1 -= 1 (0), BNE not taken -> 0x14
-      dut.io.debugPc.expect("h08".U); dut.io.debugWriteData.expect(15.U); dut.clock.step(1)
-      dut.io.debugPc.expect("h0C".U); dut.io.debugWriteData.expect(0.U); dut.clock.step(1)
-      dut.io.debugPc.expect("h10".U); dut.clock.step(1)
-
-      // Exit NOP
-      dut.io.debugPc.expect("h14".U); dut.clock.step(1)
       dut.io.debugPc.expect("h18".U)
     }
   }
@@ -154,65 +119,25 @@ class SingleCycleCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Ma
     )
 
     test(new SingleCycleCore(initialProgram = prog3)) { dut =>
-      // 0x00: addi x1, x0, 42
-      dut.io.debugPc.expect("h00".U); dut.io.debugWriteData.expect(42.U); dut.clock.step(1)
+      val trace = scala.collection.mutable.ArrayBuffer[String]()
 
-      // 0x04: sw x1, 0(x0)
-      dut.io.debugPc.expect("h04".U)
-      dut.io.debugMemWrite.expect(true.B)
-      dut.io.debugMemAddress.expect(0.U)
-      dut.io.debugMemWriteData.expect(42.U)
-      dut.clock.step(1)
+      for (cycle <- 0 until 11) {
+        val pc = dut.io.debugPc.peek().litValue
+        val inst = dut.io.debugInstruction.peek().litValue
+        val rd = dut.io.debugRd.peek().litValue
+        val regWrite = dut.io.debugRegWrite.peek().litToBoolean
+        val writeData = dut.io.debugWriteData.peek().litValue
+        val memRead = dut.io.debugMemRead.peek().litToBoolean
+        val memWrite = dut.io.debugMemWrite.peek().litToBoolean
+        val memAddr = dut.io.debugMemAddress.peek().litValue
+        val memWriteData = dut.io.debugMemWriteData.peek().litValue
+        val illegal = dut.io.debugIllegal.peek().litToBoolean
 
-      // 0x08: lw x2, 0(x0) -> x2 = 42
-      dut.io.debugPc.expect("h08".U)
-      dut.io.debugMemRead.expect(true.B)
-      dut.io.debugRd.expect(2.U)
-      dut.io.debugRegWrite.expect(true.B)
-      dut.io.debugWriteData.expect(42.U)
-      dut.clock.step(1)
+        trace += s"""  {"pc": $pc, "instruction": $inst, "rd": $rd, "regWrite": $regWrite, "writeData": $writeData, "memRead": $memRead, "memWrite": $memWrite, "memAddress": $memAddr, "memWriteData": $memWriteData, "illegal": $illegal}"""
 
-      // 0x0C: addi x3, x0, -5 -> 0xFFFFFFFB
-      dut.io.debugPc.expect("h0C".U); dut.io.debugWriteData.expect("hFFFFFFFB".U); dut.clock.step(1)
-
-      // 0x10: sb x3, 4(x0)
-      dut.io.debugPc.expect("h10".U)
-      dut.io.debugMemWrite.expect(true.B)
-      dut.io.debugMemAddress.expect(4.U)
-      dut.clock.step(1)
-
-      // 0x14: lb x4, 4(x0) -> sign-extended -5 (0xFFFFFFFB)
-      dut.io.debugPc.expect("h14".U)
-      dut.io.debugRd.expect(4.U)
-      dut.io.debugWriteData.expect("hFFFFFFFB".U)
-      dut.clock.step(1)
-
-      // 0x18: lbu x5, 4(x0) -> zero-extended 251 (0x000000FB)
-      dut.io.debugPc.expect("h18".U)
-      dut.io.debugRd.expect(5.U)
-      dut.io.debugWriteData.expect("h000000FB".U)
-      dut.clock.step(1)
-
-      // 0x1C: addi x6, x0, -1000 -> 0xFFFFFC18
-      dut.io.debugPc.expect("h1C".U); dut.io.debugWriteData.expect("hFFFFFC18".U); dut.clock.step(1)
-
-      // 0x20: sh x6, 6(x0)
-      dut.io.debugPc.expect("h20".U)
-      dut.io.debugMemWrite.expect(true.B)
-      dut.io.debugMemAddress.expect(6.U)
-      dut.clock.step(1)
-
-      // 0x24: lh x7, 6(x0) -> sign-extended -1000 (0xFFFFFC18)
-      dut.io.debugPc.expect("h24".U)
-      dut.io.debugRd.expect(7.U)
-      dut.io.debugWriteData.expect("hFFFFFC18".U)
-      dut.clock.step(1)
-
-      // 0x28: lhu x8, 6(x0) -> zero-extended 64536 (0x0000FC18)
-      dut.io.debugPc.expect("h28".U)
-      dut.io.debugRd.expect(8.U)
-      dut.io.debugWriteData.expect("h0000FC18".U)
-      dut.clock.step(1)
+        dut.clock.step(1)
+      }
+      recordCommitTrace("chisel_trace_prog3", trace)
 
       dut.io.debugPc.expect("h2C".U)
     }
@@ -234,41 +159,25 @@ class SingleCycleCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Ma
     )
 
     test(new SingleCycleCore(initialProgram = prog4)) { dut =>
-      // 0x00: addi x10, x0, 50
-      dut.io.debugPc.expect("h00".U); dut.io.debugRd.expect(10.U); dut.io.debugWriteData.expect(50.U); dut.clock.step(1)
+      val trace = scala.collection.mutable.ArrayBuffer[String]()
 
-      // 0x04: jal x1, 16 -> writes link address 0x08 into x1, jumps to 0x14
-      dut.io.debugPc.expect("h04".U)
-      dut.io.debugRd.expect(1.U)
-      dut.io.debugRegWrite.expect(true.B)
-      dut.io.debugWriteData.expect("h08".U)
-      dut.clock.step(1)
+      for (cycle <- 0 until 7) {
+        val pc = dut.io.debugPc.peek().litValue
+        val inst = dut.io.debugInstruction.peek().litValue
+        val rd = dut.io.debugRd.peek().litValue
+        val regWrite = dut.io.debugRegWrite.peek().litToBoolean
+        val writeData = dut.io.debugWriteData.peek().litValue
+        val memRead = dut.io.debugMemRead.peek().litToBoolean
+        val memWrite = dut.io.debugMemWrite.peek().litToBoolean
+        val memAddr = dut.io.debugMemAddress.peek().litValue
+        val memWriteData = dut.io.debugMemWriteData.peek().litValue
+        val illegal = dut.io.debugIllegal.peek().litToBoolean
 
-      // 0x14 (Function body): addi x10, x10, 25 -> x10 = 75
-      dut.io.debugPc.expect("h14".U)
-      dut.io.debugRd.expect(10.U)
-      dut.io.debugWriteData.expect(75.U)
-      dut.clock.step(1)
+        trace += s"""  {"pc": $pc, "instruction": $inst, "rd": $rd, "regWrite": $regWrite, "writeData": $writeData, "memRead": $memRead, "memWrite": $memWrite, "memAddress": $memAddr, "memWriteData": $memWriteData, "illegal": $illegal}"""
 
-      // 0x18: jalr x0, 0(x1) -> returns to 0x08
-      dut.io.debugPc.expect("h18".U)
-      dut.clock.step(1)
-
-      // 0x08: addi x12, x10, 10 -> x12 = 85
-      dut.io.debugPc.expect("h08".U)
-      dut.io.debugRd.expect(12.U)
-      dut.io.debugWriteData.expect(85.U)
-      dut.clock.step(1)
-
-      // 0x0C: jal x0, 16 -> jumps to 0x1C (done)
-      dut.io.debugPc.expect("h0C".U)
-      dut.clock.step(1)
-
-      // 0x1C: addi x13, x0, 1 -> x13 = 1
-      dut.io.debugPc.expect("h1C".U)
-      dut.io.debugRd.expect(13.U)
-      dut.io.debugWriteData.expect(1.U)
-      dut.clock.step(1)
+        dut.clock.step(1)
+      }
+      recordCommitTrace("chisel_trace_prog4", trace)
 
       dut.io.debugPc.expect("h20".U)
     }
@@ -289,41 +198,32 @@ class SingleCycleCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Ma
     )
 
     test(new SingleCycleCore(initialProgram = prog5)) { dut =>
-      // 0x00: addi x1, 7
-      dut.io.debugPc.expect("h00".U); dut.io.debugWriteData.expect(7.U); dut.clock.step(1)
+      val trace = scala.collection.mutable.ArrayBuffer[String]()
 
-      // 0x04: addi x2, -5
-      dut.io.debugPc.expect("h04".U); dut.io.debugWriteData.expect("hFFFFFFFB".U); dut.clock.step(1)
+      for (cycle <- 0 until 7) {
+        val pc = dut.io.debugPc.peek().litValue
+        val inst = dut.io.debugInstruction.peek().litValue
+        val rd = dut.io.debugRd.peek().litValue
+        val regWrite = dut.io.debugRegWrite.peek().litToBoolean
+        val writeData = dut.io.debugWriteData.peek().litValue
+        val memRead = dut.io.debugMemRead.peek().litToBoolean
+        val memWrite = dut.io.debugMemWrite.peek().litToBoolean
+        val memAddr = dut.io.debugMemAddress.peek().litValue
+        val memWriteData = dut.io.debugMemWriteData.peek().litValue
+        val illegal = dut.io.debugIllegal.peek().litToBoolean
 
-      // 0x08: mul x3, x1, x2 -> 7 * -5 = -35 (0xFFFFFFDD)
-      dut.io.debugPc.expect("h08".U)
-      dut.io.debugRd.expect(3.U)
-      dut.io.debugRegWrite.expect(true.B)
-      dut.io.debugWriteData.expect("hFFFFFFDD".U)
-      dut.clock.step(1)
+        trace += s"""  {"pc": $pc, "instruction": $inst, "rd": $rd, "regWrite": $regWrite, "writeData": $writeData, "memRead": $memRead, "memWrite": $memWrite, "memAddress": $memAddr, "memWriteData": $memWriteData, "illegal": $illegal}"""
 
-      // 0x0C: lui x4, 3 -> 12288
-      dut.io.debugPc.expect("h0C".U); dut.io.debugWriteData.expect(12288.U); dut.clock.step(1)
-
-      // 0x10: addi x4, x4, 57 -> 12345
-      dut.io.debugPc.expect("h10".U); dut.io.debugWriteData.expect(12345.U); dut.clock.step(1)
-
-      // 0x14: addi x5, x0, 2000
-      dut.io.debugPc.expect("h14".U); dut.io.debugWriteData.expect(2000.U); dut.clock.step(1)
-
-      // 0x18: mul x6, x4, x5 -> 12345 * 2000 = 24690000 (0x0178BD50)
-      dut.io.debugPc.expect("h18".U)
-      dut.io.debugRd.expect(6.U)
-      dut.io.debugRegWrite.expect(true.B)
-      dut.io.debugWriteData.expect(24690000.U)
-      dut.clock.step(1)
+        dut.clock.step(1)
+      }
+      recordCommitTrace("chisel_trace_prog5", trace)
 
       dut.io.debugPc.expect("h1C".U)
     }
   }
 
   // -------------------------------------------------------------
-  // Full Datapath Coverage: Shift, Unsigned Compare, AUIPC, and Branch Matrix
+  // Full Datapath Coverage: Shift, Logical, AUIPC, and Unsigned Compare Matrix
   // -------------------------------------------------------------
   it should "execute complete shift, logical, AUIPC, and unsigned compare matrix" in {
     val progShift = Seq(
@@ -361,53 +261,111 @@ class SingleCycleCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Ma
     }
   }
 
-  it should "execute all 6 branch condition types in taken and not-taken branches" in {
+  // -------------------------------------------------------------
+  // Full Branch Condition Matrix: Both Taken AND Not-Taken Cases for all 6 Conditions
+  // -------------------------------------------------------------
+  it should "execute all 6 branch condition types in both taken and not-taken branches" in {
     val progBranch = Seq(
+      // Setup operands: x1 = 10, x2 = 10, x3 = 20, x4 = -5 (0xFFFFFFFB)
       BigInt("00a00093", 16), // 0x00: addi x1, x0, 10
       BigInt("00a00113", 16), // 0x04: addi x2, x0, 10
       BigInt("01400193", 16), // 0x08: addi x3, x0, 20
-      // BEQ taken (x1 == x2) -> jump to 0x14
-      BigInt("00208463", 16), // 0x0C: beq  x1, x2, +8 (to 0x14)
-      BigInt("3e700713", 16), // 0x10: addi x14, x0, 999 (skipped)
-      // BLT taken (x1 < x3, 10 < 20) -> jump to 0x20
-      BigInt("0030c463", 16), // 0x14: blt  x1, x3, +8 (to 0x1C)
-      BigInt("3e700713", 16), // 0x18: addi x14, x0, 999 (skipped)
-      // BGE taken (x3 >= x1, 20 >= 10) -> jump to 0x28
-      BigInt("0011d463", 16), // 0x1C: bge  x3, x1, +8 (to 0x24)
-      BigInt("3e700713", 16), // 0x20: addi x14, x0, 999 (skipped)
-      // BLTU taken (10 < 20 unsigned) -> jump to 0x30
-      BigInt("0030e463", 16), // 0x24: bltu x1, x3, +8 (to 0x2C)
-      BigInt("3e700713", 16), // 0x28: addi x14, x0, 999 (skipped)
-      // BGEU taken (20 >= 10 unsigned) -> jump to 0x38
-      BigInt("0011f463", 16), // 0x2C: bgeu x3, x1, +8 (to 0x34)
-      BigInt("3e700713", 16), // 0x30: addi x14, x0, 999 (skipped)
-      // Done marker
-      BigInt("00100793", 16)  // 0x34: addi x15, x0, 1
+      BigInt("ffb00213", 16), // 0x0C: addi x4, x0, -5
+
+      // 1. BEQ: taken (x1 == x2, 10 == 10)
+      BigInt("00208463", 16), // 0x10: beq x1, x2, +8 (jumps to 0x18)
+      BigInt("3e700713", 16), // 0x14: addi x14, x0, 999 (skipped)
+      // 1b. BEQ: NOT taken (x1 == x3, 10 == 20) -> falls through to 0x20
+      BigInt("00308463", 16), // 0x18: beq x1, x3, +8 (not taken)
+      BigInt("00100513", 16), // 0x1C: addi x10, x0, 1 (executed!)
+
+      // 2. BNE: taken (x1 != x3, 10 != 20) -> jumps to 0x28
+      BigInt("00309463", 16), // 0x20: bne x1, x3, +8 (jumps to 0x28)
+      BigInt("3e700713", 16), // 0x24: addi x14, x0, 999 (skipped)
+      // 2b. BNE: NOT taken (x1 != x2, 10 != 10) -> falls through to 0x30
+      BigInt("00209463", 16), // 0x28: bne x1, x2, +8 (not taken)
+      BigInt("00200593", 16), // 0x2C: addi x11, x0, 2 (executed!)
+
+      // 3. BLT: taken (signed x4 < x1, -5 < 10) -> jumps to 0x38
+      BigInt("00124463", 16), // 0x30: blt x4, x1, +8 (jumps to 0x38)
+      BigInt("3e700713", 16), // 0x34: addi x14, x0, 999 (skipped)
+      // 3b. BLT: NOT taken (signed x1 < x4, 10 < -5) -> falls through to 0x40
+      BigInt("0040c463", 16), // 0x38: blt x1, x4, +8 (not taken)
+      BigInt("00300613", 16), // 0x3C: addi x12, x0, 3 (executed!)
+
+      // 4. BGE: taken (signed x1 >= x4, 10 >= -5) -> jumps to 0x48
+      BigInt("0040d463", 16), // 0x40: bge x1, x4, +8 (jumps to 0x48)
+      BigInt("3e700713", 16), // 0x44: addi x14, x0, 999 (skipped)
+      // 4b. BGE: NOT taken (signed x4 >= x1, -5 >= 10) -> falls through to 0x50
+      BigInt("00125463", 16), // 0x48: bge x4, x1, +8 (not taken)
+      BigInt("00400693", 16), // 0x4C: addi x13, x0, 4 (executed!)
+
+      // 5. BLTU: taken (unsigned x1 < x3, 10 < 20) -> jumps to 0x58
+      BigInt("0030e463", 16), // 0x50: bltu x1, x3, +8 (jumps to 0x58)
+      BigInt("3e700713", 16), // 0x54: addi x14, x0, 999 (skipped)
+      // 5b. BLTU: NOT taken (unsigned x4 < x1, 0xFFFFFFFB < 10 is false) -> falls through to 0x60
+      BigInt("00126463", 16), // 0x58: bltu x4, x1, +8 (not taken)
+      BigInt("00500713", 16), // 0x5C: addi x14, x0, 5 (executed!)
+
+      // 6. BGEU: taken (unsigned x4 >= x1, 0xFFFFFFFB >= 10 is true) -> jumps to 0x68
+      BigInt("00127463", 16), // 0x60: bgeu x4, x1, +8 (jumps to 0x68)
+      BigInt("3e700713", 16), // 0x64: addi x15, x0, 999 (skipped)
+      // 6b. BGEU: NOT taken (unsigned x1 >= x3, 10 >= 20 is false) -> falls through to 0x70
+      BigInt("0030f463", 16), // 0x68: bgeu x1, x3, +8 (not taken)
+      BigInt("00600793", 16)  // 0x6C: addi x15, x0, 6 (executed!)
     )
 
     test(new SingleCycleCore(initialProgram = progBranch)) { dut =>
+      // Setup: 0x00, 0x04, 0x08, 0x0C
       dut.io.debugPc.expect("h00".U); dut.clock.step(1)
       dut.io.debugPc.expect("h04".U); dut.clock.step(1)
       dut.io.debugPc.expect("h08".U); dut.clock.step(1)
-      // BEQ taken: from 0x0C jumps directly to 0x14
       dut.io.debugPc.expect("h0C".U); dut.clock.step(1)
-      dut.io.debugPc.expect("h14".U); dut.clock.step(1)
-      // BLT taken: from 0x14 jumps to 0x1C
-      dut.io.debugPc.expect("h1C".U); dut.clock.step(1)
-      // BGE taken: from 0x1C jumps to 0x24
-      dut.io.debugPc.expect("h24".U); dut.clock.step(1)
-      // BLTU taken: from 0x24 jumps to 0x2C
-      dut.io.debugPc.expect("h2C".U); dut.clock.step(1)
-      // BGEU taken: from 0x2C jumps to 0x34
-      dut.io.debugPc.expect("h34".U)
-      dut.io.debugRd.expect(15.U)
-      dut.io.debugWriteData.expect(1.U)
-      dut.clock.step(1)
-      dut.io.debugPc.expect("h38".U)
+
+      // 1. BEQ taken: from 0x10 jumps to 0x18
+      dut.io.debugPc.expect("h10".U); dut.clock.step(1)
+      // 1b. BEQ not taken: from 0x18 falls through to 0x1C (x10 = 1)
+      dut.io.debugPc.expect("h18".U); dut.clock.step(1)
+      dut.io.debugPc.expect("h1C".U); dut.io.debugRd.expect(10.U); dut.io.debugWriteData.expect(1.U); dut.clock.step(1)
+
+      // 2. BNE taken: from 0x20 jumps to 0x28
+      dut.io.debugPc.expect("h20".U); dut.clock.step(1)
+      // 2b. BNE not taken: from 0x28 falls through to 0x2C (x11 = 2)
+      dut.io.debugPc.expect("h28".U); dut.clock.step(1)
+      dut.io.debugPc.expect("h2C".U); dut.io.debugRd.expect(11.U); dut.io.debugWriteData.expect(2.U); dut.clock.step(1)
+
+      // 3. BLT taken: from 0x30 jumps to 0x38
+      dut.io.debugPc.expect("h30".U); dut.clock.step(1)
+      // 3b. BLT not taken: from 0x38 falls through to 0x3C (x12 = 3)
+      dut.io.debugPc.expect("h38".U); dut.clock.step(1)
+      dut.io.debugPc.expect("h3C".U); dut.io.debugRd.expect(12.U); dut.io.debugWriteData.expect(3.U); dut.clock.step(1)
+
+      // 4. BGE taken: from 0x40 jumps to 0x48
+      dut.io.debugPc.expect("h40".U); dut.clock.step(1)
+      // 4b. BGE not taken: from 0x48 falls through to 0x4C (x13 = 4)
+      dut.io.debugPc.expect("h48".U); dut.clock.step(1)
+      dut.io.debugPc.expect("h4C".U); dut.io.debugRd.expect(13.U); dut.io.debugWriteData.expect(4.U); dut.clock.step(1)
+
+      // 5. BLTU taken: from 0x50 jumps to 0x58
+      dut.io.debugPc.expect("h50".U); dut.clock.step(1)
+      // 5b. BLTU not taken: from 0x58 falls through to 0x5C (x14 = 5)
+      dut.io.debugPc.expect("h58".U); dut.clock.step(1)
+      dut.io.debugPc.expect("h5C".U); dut.io.debugRd.expect(14.U); dut.io.debugWriteData.expect(5.U); dut.clock.step(1)
+
+      // 6. BGEU taken: from 0x60 jumps to 0x68
+      dut.io.debugPc.expect("h60".U); dut.clock.step(1)
+      // 6b. BGEU not taken: from 0x68 falls through to 0x6C (x15 = 6)
+      dut.io.debugPc.expect("h68".U); dut.clock.step(1)
+      dut.io.debugPc.expect("h6C".U); dut.io.debugRd.expect(15.U); dut.io.debugWriteData.expect(6.U); dut.clock.step(1)
+
+      dut.io.debugPc.expect("h70".U)
     }
   }
 
-  it should "detect misaligned core memory accesses and suppress writeback and stores" in {
+  // -------------------------------------------------------------
+  // Misaligned Access Suppression
+  // -------------------------------------------------------------
+  it should "detect misaligned core memory accesses and suppress effective writeback and stores" in {
     val progMisaligned = Seq(
       BigInt("02a00093", 16), // 0x00: addi x1, x0, 42
       BigInt("001020a3", 16), // 0x04: sw   x1, 1(x0)   (MISALIGNED word store at addr 0x01)
@@ -420,13 +378,15 @@ class SingleCycleCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Ma
 
       // 0x04: sw x1, 1(x0) -> misaligned word store
       dut.io.debugPc.expect("h04".U)
-      dut.io.debugMemWrite.expect(true.B)
+      dut.io.debugMemWriteReq.expect(true.B)
+      dut.io.debugMemWrite.expect(false.B) // Effective architectural store MUST be false!
       dut.io.debugMemAddress.expect(1.U)
       dut.clock.step(1)
 
       // 0x08: lw x2, 1(x0) -> misaligned word load -> writeback suppressed
       dut.io.debugPc.expect("h08".U)
-      dut.io.debugMemRead.expect(true.B)
+      dut.io.debugMemReadReq.expect(true.B)
+      dut.io.debugMemRead.expect(false.B) // Effective architectural load MUST be false!
       dut.io.debugRegWrite.expect(false.B) // Reg writeback MUST be suppressed on misaligned load
       dut.clock.step(1)
 

@@ -15,8 +15,10 @@ class SingleCycleCoreIO extends Bundle {
   val debugWriteData    = Output(UInt(32.W))
   val debugRegWrite     = Output(Bool())
   val debugIllegal      = Output(Bool())
-  val debugMemRead      = Output(Bool())
-  val debugMemWrite     = Output(Bool())
+  val debugMemRead      = Output(Bool()) // Effective architectural read (false if misaligned)
+  val debugMemReadReq   = Output(Bool()) // Requested read signal from decoder
+  val debugMemWrite     = Output(Bool()) // Effective architectural write (false if misaligned)
+  val debugMemWriteReq  = Output(Bool()) // Requested write signal from decoder
   val debugMemAddress   = Output(UInt(32.W))
   val debugMemWriteData = Output(UInt(32.W))
   val debugMemReadData  = Output(UInt(32.W))
@@ -37,7 +39,7 @@ class SingleCycleCore(
   val imem    = Module(new InstructionMemory(imemDepthWords, initialProgram))
   val decoder = Module(new Decoder)
   val rf      = Module(new RegisterFile)
-  val alu     = Module(new ALU(32)) // Reusing Objective 1's verified arithmetic core
+  val alu     = Module(new ALU(32)) // Reusing Objective 1's verified arithmetic datapath
   val bju     = Module(new BranchJumpUnit)
   val dmem    = Module(new DataMemory(dmemSizeBytes))
 
@@ -108,8 +110,8 @@ class SingleCycleCore(
 
   rf.io.rdAddress   := decoder.io.rd
   rf.io.writeData   := writebackData
-  // In case of memory misalignment on load/store, suppress writeback
-  rf.io.writeEnable := decoder.io.controls.regWrite && !dmem.io.misaligned
+  // In case of memory misalignment or rd === 0, suppress writeback
+  rf.io.writeEnable := decoder.io.controls.regWrite && (decoder.io.rd =/= 0.U) && !dmem.io.misaligned
 
   // -------------------------------------------------------------
   // 8. Architectural Commit / Debug Visibility
@@ -120,8 +122,10 @@ class SingleCycleCore(
   io.debugWriteData    := writebackData
   io.debugRegWrite     := rf.io.writeEnable
   io.debugIllegal      := decoder.io.controls.illegalInstruction
-  io.debugMemRead      := decoder.io.controls.memRead
-  io.debugMemWrite     := decoder.io.controls.memWrite
+  io.debugMemReadReq   := decoder.io.controls.memRead
+  io.debugMemRead      := decoder.io.controls.memRead && !dmem.io.misaligned
+  io.debugMemWriteReq  := decoder.io.controls.memWrite
+  io.debugMemWrite     := decoder.io.controls.memWrite && !dmem.io.misaligned
   io.debugMemAddress   := alu.io.result
   io.debugMemWriteData := rf.io.rs2Data
   io.debugMemReadData  := dmem.io.readData

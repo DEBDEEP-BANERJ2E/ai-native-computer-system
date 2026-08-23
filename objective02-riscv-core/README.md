@@ -103,8 +103,7 @@ objective02-riscv-core/
 - **XLEN**: 32-bit
 - **Instruction Width**: 32-bit
 - **Byte Order**: Little-endian
-- **Registers**: `x0`–`x31` (`x0` hardwired to `0x00000000`)
-- **Execution Reuse**: Directly reuses Objective 1's `ALU`, `HierarchicalCarryLookaheadAdder`, `BoothWallaceMultiplier`, and `TelemetryBlock`.
+- **Execution Reuse**: Directly reuses Objective 1's `ALU(32)` arithmetic datapath (including `HierarchicalCarryLookaheadAdder` and `BoothWallaceMultiplier`). `TelemetryBlock` and performance counter integration are reserved for the Phase 6 MMIO interface.
 
 ---
 

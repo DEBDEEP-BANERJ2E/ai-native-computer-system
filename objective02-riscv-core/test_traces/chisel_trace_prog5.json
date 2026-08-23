@@ -1,0 +1,9 @@
+[
+  {"pc": 0, "instruction": 7340179, "rd": 1, "regWrite": true, "writeData": 7, "memRead": false, "memWrite": false, "memAddress": 7, "memWriteData": 0, "illegal": false},
+  {"pc": 4, "instruction": 4289724691, "rd": 2, "regWrite": true, "writeData": 4294967291, "memRead": false, "memWrite": false, "memAddress": 4294967291, "memWriteData": 0, "illegal": false},
+  {"pc": 8, "instruction": 35684787, "rd": 3, "regWrite": true, "writeData": 4294967261, "memRead": false, "memWrite": false, "memAddress": 4294967261, "memWriteData": 4294967291, "illegal": false},
+  {"pc": 12, "instruction": 12855, "rd": 4, "regWrite": true, "writeData": 12288, "memRead": false, "memWrite": false, "memAddress": 12288, "memWriteData": 0, "illegal": false},
+  {"pc": 16, "instruction": 59900435, "rd": 4, "regWrite": true, "writeData": 12345, "memRead": false, "memWrite": false, "memAddress": 12345, "memWriteData": 0, "illegal": false},
+  {"pc": 20, "instruction": 2097152659, "rd": 5, "regWrite": true, "writeData": 2000, "memRead": false, "memWrite": false, "memAddress": 2000, "memWriteData": 0, "illegal": false},
+  {"pc": 24, "instruction": 38929203, "rd": 6, "regWrite": true, "writeData": 24690000, "memRead": false, "memWrite": false, "memAddress": 24690000, "memWriteData": 2000, "illegal": false}
+]
