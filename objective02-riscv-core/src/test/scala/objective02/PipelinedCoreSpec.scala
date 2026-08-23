@@ -190,7 +190,7 @@ class PipelinedCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Matc
   }
 
   // -------------------------------------------------------------
-  // Test 4: JAL and JALR Control Flow and Link Register Commit
+  // Test 4: JAL Control Flow and Link Register Commit
   // -------------------------------------------------------------
   it should "correctly execute JAL with link register writeback and branch target redirect" in {
     val progJal = Seq(
@@ -224,51 +224,132 @@ class PipelinedCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Matc
   }
 
   // -------------------------------------------------------------
-  // Test 5: Hazard-Free Memory Operations (SB, SW, LB, LW)
+  // Test 5: JALR Indirect Jump with LSB=0 Masking and Link Writeback
   // -------------------------------------------------------------
-  it should "execute hazard-free memory operations and commit exact little-endian loads and stores" in {
-    val progMem = Seq(
-      BigInt("02a00093", 16), // 0x00: addi x1, x0, 42
+  it should "correctly execute JALR with (rs1 + imm) & ~1 target address masking and wrong-path flush" in {
+    val progJalr = Seq(
+      BigInt("01100293", 16), // 0x00: addi x5, x0, 0x11 (odd address 17)
       BigInt("00000013", 16), // 0x04: nop
       BigInt("00000013", 16), // 0x08: nop
       BigInt("00000013", 16), // 0x0C: nop
-      BigInt("00102023", 16), // 0x10: sw   x1, 0(x0)
-      BigInt("00000013", 16), // 0x14: nop
-      BigInt("00000013", 16), // 0x18: nop
+      BigInt("000280e7", 16), // 0x10: jalr x1, 0(x5)    (target: (0x11 + 0) & ~1 = 0x10; link x1 = 0x14)
+      BigInt("3e700713", 16), // 0x14: addi x14, x0, 999 (wrong path 1)
+      BigInt("37800713", 16), // 0x18: addi x14, x0, 888 (wrong path 2)
       BigInt("00000013", 16), // 0x1C: nop
-      BigInt("00002103", 16)  // 0x20: lw   x2, 0(x0) -> x2 = 42
+      BigInt("04d00113", 16)  // 0x10 (overwritten by jump target): addi x2, x0, 77
     )
 
-    test(new PipelinedCore(initialProgram = progMem)) { dut =>
-      var sawSwCommit = false
-      var sawLwCommit = false
+    // Note: To jump to an forward target, let's use base 0x21 (33) -> (0x21) & ~1 = 0x20
+    val progJalrForward = Seq(
+      BigInt("02100293", 16), // 0x00: addi x5, x0, 0x21 (odd address 33)
+      BigInt("00000013", 16), // 0x04: nop
+      BigInt("00000013", 16), // 0x08: nop
+      BigInt("00000013", 16), // 0x0C: nop
+      BigInt("000280e7", 16), // 0x10: jalr x1, 0(x5)    (link x1 = 0x14; target (0x21) & ~1 = 0x20)
+      BigInt("3e700713", 16), // 0x14: addi x14, x0, 999 (wrong path 1 -> killed)
+      BigInt("37800713", 16), // 0x18: addi x14, x0, 888 (wrong path 2 -> killed)
+      BigInt("00000013", 16), // 0x1C: nop
+      BigInt("04d00113", 16)  // 0x20: addi x2, x0, 77   (target instruction!)
+    )
+
+    test(new PipelinedCore(initialProgram = progJalrForward)) { dut =>
+      val retiredPcs = scala.collection.mutable.ArrayBuffer[BigInt]()
+      val retiredRds = scala.collection.mutable.ArrayBuffer[BigInt]()
+      var linkVal: BigInt = 0
+      var targetVal: BigInt = 0
 
       for (c <- 0 until 18) {
         if (dut.io.commit.valid.peek().litToBoolean) {
           val pc = dut.io.commit.pc.peek().litValue
-          if (pc == BigInt(0x10)) {
-            dut.io.commit.memWrite.expect(true.B)
-            dut.io.commit.memAddress.expect(0.U)
-            dut.io.commit.memWriteData.expect(42.U)
-            sawSwCommit = true
+          val rd = dut.io.commit.rd.peek().litValue
+          retiredPcs += pc
+          retiredRds += rd
+          if (pc == BigInt(0x10) && rd == BigInt(1)) {
+            linkVal = dut.io.commit.writeData.peek().litValue
           }
-          if (pc == BigInt(0x20)) {
-            dut.io.commit.memRead.expect(true.B)
-            dut.io.commit.rd.expect(2.U)
-            dut.io.commit.writeData.expect(42.U)
-            sawLwCommit = true
+          if (pc == BigInt(0x20) && rd == BigInt(2)) {
+            targetVal = dut.io.commit.writeData.peek().litValue
           }
         }
         dut.clock.step(1)
       }
 
-      sawSwCommit shouldBe true
-      sawLwCommit shouldBe true
+      // Link register x1 must receive PC + 4 = 0x14
+      linkVal shouldBe BigInt(0x14)
+      // Target instruction must execute and produce x2 = 77
+      targetVal shouldBe BigInt(77)
+
+      // Verify wrong-path instructions were flushed
+      retiredPcs should not contain (BigInt(0x14))
+      retiredPcs should not contain (BigInt(0x18))
+      retiredRds should not contain (BigInt(14))
     }
   }
 
   // -------------------------------------------------------------
-  // Test 6: Hardware Multiplier (Objective 1 Booth-Wallace Radix-4 Tree in EX)
+  // Test 6: Hazard-Free Memory Operations (Word SW/LW and Byte SB/LB)
+  // -------------------------------------------------------------
+  it should "execute hazard-free word and byte memory operations (SW, LW, SB, LB)" in {
+    val progMem = Seq(
+      BigInt("02a00093", 16), // 0x00: addi x1, x0, 42
+      BigInt("ffb00113", 16), // 0x04: addi x2, x0, -5   (0xFFFFFFFB)
+      BigInt("00000013", 16), // 0x08: nop
+      BigInt("00000013", 16), // 0x0C: nop
+      BigInt("00000013", 16), // 0x10: nop
+      BigInt("00102023", 16), // 0x14: sw   x1, 0(x0)
+      BigInt("00200223", 16), // 0x18: sb   x2, 4(x0)
+      BigInt("00000013", 16), // 0x1C: nop
+      BigInt("00000013", 16), // 0x20: nop
+      BigInt("00000013", 16), // 0x24: nop
+      BigInt("00002183", 16), // 0x28: lw   x3, 0(x0)   -> x3 = 42
+      BigInt("00400203", 16)  // 0x2C: lb   x4, 4(x0)   -> x4 = -5 (0xFFFFFFFB)
+    )
+
+    test(new PipelinedCore(initialProgram = progMem)) { dut =>
+      var sawSw = false
+      var sawSb = false
+      var sawLw = false
+      var sawLb = false
+
+      for (c <- 0 until 24) {
+        if (dut.io.commit.valid.peek().litToBoolean) {
+          val pc = dut.io.commit.pc.peek().litValue
+          if (pc == BigInt(0x14)) {
+            dut.io.commit.memWrite.expect(true.B)
+            dut.io.commit.memAddress.expect(0.U)
+            dut.io.commit.memWriteData.expect(42.U)
+            sawSw = true
+          }
+          if (pc == BigInt(0x18)) {
+            dut.io.commit.memWrite.expect(true.B)
+            dut.io.commit.memAddress.expect(4.U)
+            sawSb = true
+          }
+          if (pc == BigInt(0x28)) {
+            dut.io.commit.memRead.expect(true.B)
+            dut.io.commit.rd.expect(3.U)
+            dut.io.commit.writeData.expect(42.U)
+            sawLw = true
+          }
+          if (pc == BigInt(0x2C)) {
+            dut.io.commit.memRead.expect(true.B)
+            dut.io.commit.rd.expect(4.U)
+            dut.io.commit.writeData.expect("hFFFFFFFB".U)
+            sawLb = true
+          }
+        }
+        dut.clock.step(1)
+      }
+
+      sawSw shouldBe true
+      sawSb shouldBe true
+      sawLw shouldBe true
+      sawLb shouldBe true
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Test 7: Hardware Multiplier (Objective 1 Booth-Wallace Radix-4 Tree in EX)
   // -------------------------------------------------------------
   it should "execute hardware multiplication through EX stage and commit correct product" in {
     val progMul = Seq(
@@ -299,40 +380,91 @@ class PipelinedCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Matc
   }
 
   // -------------------------------------------------------------
-  // Test 7: Export Hazard-Free Benchmark Retirement Traces
+  // Test 8: Export 3-Way Differential Benchmark Traces
   // -------------------------------------------------------------
-  it should "export pipeline retirement trace for comparison against golden single-cycle core" in {
-    val prog1_spaced = Seq(
+  it should "export pipeline benchmark traces 1, 2, and 3 for 3-way differential verification" in {
+    // Benchmark 1: Arithmetic & MUL
+    val pipeProg1 = Seq(
       BigInt("00a00093", 16), // 0x00: addi x1, x0, 10
       BigInt("01400113", 16), // 0x04: addi x2, x0, 20
       BigInt("00000013", 16), // 0x08: nop
       BigInt("00000013", 16), // 0x0C: nop
-      BigInt("002081b3", 16), // 0x10: add  x3, x1, x2  (30)
-      BigInt("00000013", 16), // 0x14: nop
+      BigInt("00000013", 16), // 0x10: nop
+      BigInt("002081b3", 16), // 0x14: add  x3, x1, x2  (30)
       BigInt("00000013", 16), // 0x18: nop
-      BigInt("40118233", 16), // 0x1C: sub  x4, x3, x1  (20)
+      BigInt("00000013", 16), // 0x1C: nop
       BigInt("00000013", 16), // 0x20: nop
-      BigInt("00000013", 16), // 0x24: nop
-      BigInt("003222b3", 16), // 0x28: slt  x5, x4, x3  (1)
-      BigInt("0020c333", 16), // 0x2C: xor  x6, x1, x2  (30)
-      BigInt("0020e3b3", 16), // 0x30: or   x7, x1, x2  (30)
-      BigInt("0020f433", 16)  // 0x34: and  x8, x1, x2  (0)
+      BigInt("40118233", 16), // 0x24: sub  x4, x3, x1  (20)
+      BigInt("00000013", 16), // 0x28: nop
+      BigInt("00000013", 16), // 0x2C: nop
+      BigInt("00000013", 16), // 0x30: nop
+      BigInt("021202b3", 16)  // 0x34: mul  x5, x4, x1  (20 * 10 = 200 = 0xC8)
     )
 
-    test(new PipelinedCore(initialProgram = prog1_spaced)) { dut =>
+    test(new PipelinedCore(initialProgram = pipeProg1)) { dut =>
       val trace = scala.collection.mutable.ArrayBuffer[String]()
-
-      for (cycle <- 0 until 25) {
-        val ev = captureRetirementEvent(dut)
-        ev.foreach { e =>
-          // Filter out internal padding NOPs for retirement event stream
-          if (!e.contains(""""instruction": 19""") || e.contains(""""writeData": 10""") || e.contains(""""writeData": 20""")) {
-            trace += e
-          }
-        }
+      for (_ <- 0 until 20) {
+        captureRetirementEvent(dut).foreach(trace += _)
         dut.clock.step(1)
       }
-      recordPipelineTrace("pipeline_trace_prog1_spaced", trace)
+      recordPipelineTrace("pipelined_core_prog1", trace)
+    }
+
+    // Benchmark 2: Memory Operations
+    val pipeProg2 = Seq(
+      BigInt("02a00093", 16), // 0x00: addi x1, x0, 42
+      BigInt("ffb00113", 16), // 0x04: addi x2, x0, -5   (0xFFFFFFFB)
+      BigInt("00000013", 16), // 0x08: nop
+      BigInt("00000013", 16), // 0x0C: nop
+      BigInt("00000013", 16), // 0x10: nop
+      BigInt("00102023", 16), // 0x14: sw   x1, 0(x0)
+      BigInt("00200223", 16), // 0x18: sb   x2, 4(x0)
+      BigInt("00000013", 16), // 0x1C: nop
+      BigInt("00000013", 16), // 0x20: nop
+      BigInt("00000013", 16), // 0x24: nop
+      BigInt("00002183", 16), // 0x28: lw   x3, 0(x0)   (42)
+      BigInt("00400203", 16)  // 0x2C: lb   x4, 4(x0)   (-5 = 0xFFFFFFFB)
+    )
+
+    test(new PipelinedCore(initialProgram = pipeProg2)) { dut =>
+      val trace = scala.collection.mutable.ArrayBuffer[String]()
+      for (_ <- 0 until 18) {
+        captureRetirementEvent(dut).foreach(trace += _)
+        dut.clock.step(1)
+      }
+      recordPipelineTrace("pipelined_core_prog2", trace)
+    }
+
+    // Benchmark 3: Control Flow (BEQ, JALR)
+    val pipeProg3 = Seq(
+      BigInt("00a00093", 16), // 0x00: addi x1, x0, 10
+      BigInt("00a00113", 16), // 0x04: addi x2, x0, 10
+      BigInt("00000013", 16), // 0x08: nop
+      BigInt("00000013", 16), // 0x0C: nop
+      BigInt("00000013", 16), // 0x10: nop
+      BigInt("00208863", 16), // 0x14: beq  x1, x2, 16    (taken -> jumps to 0x24)
+      BigInt("3e700713", 16), // 0x18: addi x14, x0, 999 (killed wrong path)
+      BigInt("37800713", 16), // 0x1C: addi x14, x0, 888 (killed wrong path)
+      BigInt("00000013", 16), // 0x20: nop
+      BigInt("04900293", 16), // 0x24: addi x5, x0, 0x49 (target 0x49, bit 0 cleared to 0x48)
+      BigInt("00000013", 16), // 0x28: nop
+      BigInt("00000013", 16), // 0x2C: nop
+      BigInt("00000013", 16), // 0x30: nop
+      BigInt("00028367", 16), // 0x34: jalr x6, 0(x5)     (link x6 = 0x38, jumps to 0x48)
+      BigInt("3e700713", 16), // 0x38: addi x14, x0, 777 (killed wrong path)
+      BigInt("37800713", 16), // 0x3C: addi x14, x0, 666 (killed wrong path)
+      BigInt("00000013", 16), // 0x40: nop
+      BigInt("00000013", 16), // 0x44: nop
+      BigInt("06400393", 16)  // 0x48: addi x7, x0, 100
+    )
+
+    test(new PipelinedCore(initialProgram = pipeProg3)) { dut =>
+      val trace = scala.collection.mutable.ArrayBuffer[String]()
+      for (_ <- 0 until 20) {
+        captureRetirementEvent(dut).foreach(trace += _)
+        dut.clock.step(1)
+      }
+      recordPipelineTrace("pipelined_core_prog3", trace)
     }
   }
 }

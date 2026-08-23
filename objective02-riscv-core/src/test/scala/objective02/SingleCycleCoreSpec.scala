@@ -351,4 +351,101 @@ class SingleCycleCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Ma
       dut.io.debugPc.expect("h0C".U)
     }
   }
+
+  // -------------------------------------------------------------
+  // Pipeline Benchmark Program 1: Arithmetic & Hardware MUL
+  // -------------------------------------------------------------
+  it should "execute Pipeline Benchmark 1 and export architectural trace for 3-way verification" in {
+    val pipeProg1 = Seq(
+      BigInt("00a00093", 16), // 0x00: addi x1, x0, 10
+      BigInt("01400113", 16), // 0x04: addi x2, x0, 20
+      BigInt("00000013", 16), // 0x08: nop
+      BigInt("00000013", 16), // 0x0C: nop
+      BigInt("00000013", 16), // 0x10: nop
+      BigInt("002081b3", 16), // 0x14: add  x3, x1, x2  (30)
+      BigInt("00000013", 16), // 0x18: nop
+      BigInt("00000013", 16), // 0x1C: nop
+      BigInt("00000013", 16), // 0x20: nop
+      BigInt("40118233", 16), // 0x24: sub  x4, x3, x1  (20)
+      BigInt("00000013", 16), // 0x28: nop
+      BigInt("00000013", 16), // 0x2C: nop
+      BigInt("00000013", 16), // 0x30: nop
+      BigInt("021202b3", 16)  // 0x34: mul  x5, x4, x1  (20 * 10 = 200 = 0xC8)
+    )
+
+    test(new SingleCycleCore(initialProgram = pipeProg1)) { dut =>
+      val trace = scala.collection.mutable.ArrayBuffer[String]()
+      for (_ <- 0 until 14) {
+        trace += captureCommitEvent(dut)
+        dut.clock.step(1)
+      }
+      recordCommitTrace("single_cycle_pipe_prog1", trace)
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Pipeline Benchmark Program 2: Memory Operations (SW, LW, SB, LB)
+  // -------------------------------------------------------------
+  it should "execute Pipeline Benchmark 2 and export architectural trace for 3-way verification" in {
+    val pipeProg2 = Seq(
+      BigInt("02a00093", 16), // 0x00: addi x1, x0, 42
+      BigInt("ffb00113", 16), // 0x04: addi x2, x0, -5   (0xFFFFFFFB)
+      BigInt("00000013", 16), // 0x08: nop
+      BigInt("00000013", 16), // 0x0C: nop
+      BigInt("00000013", 16), // 0x10: nop
+      BigInt("00102023", 16), // 0x14: sw   x1, 0(x0)
+      BigInt("00200223", 16), // 0x18: sb   x2, 4(x0)
+      BigInt("00000013", 16), // 0x1C: nop
+      BigInt("00000013", 16), // 0x20: nop
+      BigInt("00000013", 16), // 0x24: nop
+      BigInt("00002183", 16), // 0x28: lw   x3, 0(x0)   (42)
+      BigInt("00400203", 16)  // 0x2C: lb   x4, 4(x0)   (-5 = 0xFFFFFFFB)
+    )
+
+    test(new SingleCycleCore(initialProgram = pipeProg2)) { dut =>
+      val trace = scala.collection.mutable.ArrayBuffer[String]()
+      for (_ <- 0 until 12) {
+        trace += captureCommitEvent(dut)
+        dut.clock.step(1)
+      }
+      recordCommitTrace("single_cycle_pipe_prog2", trace)
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Pipeline Benchmark Program 3: Control Flow (BEQ, JALR with (rs1 + imm) & ~1)
+  // -------------------------------------------------------------
+  it should "execute Pipeline Benchmark 3 and export architectural trace for 3-way verification" in {
+    val pipeProg3 = Seq(
+      BigInt("00a00093", 16), // 0x00: addi x1, x0, 10
+      BigInt("00a00113", 16), // 0x04: addi x2, x0, 10
+      BigInt("00000013", 16), // 0x08: nop
+      BigInt("00000013", 16), // 0x0C: nop
+      BigInt("00000013", 16), // 0x10: nop
+      BigInt("00208863", 16), // 0x14: beq  x1, x2, 16    (taken -> jumps to 0x24)
+      BigInt("3e700713", 16), // 0x18: addi x14, x0, 999 (killed wrong path)
+      BigInt("37800713", 16), // 0x1C: addi x14, x0, 888 (killed wrong path)
+      BigInt("00000013", 16), // 0x20: nop
+      BigInt("04900293", 16), // 0x24: addi x5, x0, 0x49 (target 0x49, bit 0 cleared to 0x48)
+      BigInt("00000013", 16), // 0x28: nop
+      BigInt("00000013", 16), // 0x2C: nop
+      BigInt("00000013", 16), // 0x30: nop
+      BigInt("00028367", 16), // 0x34: jalr x6, 0(x5)     (link x6 = 0x38, jumps to 0x48)
+      BigInt("3e700713", 16), // 0x38: addi x14, x0, 777 (killed wrong path)
+      BigInt("37800713", 16), // 0x3C: addi x14, x0, 666 (killed wrong path)
+      BigInt("00000013", 16), // 0x40: nop
+      BigInt("00000013", 16), // 0x44: nop
+      BigInt("06400393", 16)  // 0x48: addi x7, x0, 100
+    )
+
+    test(new SingleCycleCore(initialProgram = pipeProg3)) { dut =>
+      val trace = scala.collection.mutable.ArrayBuffer[String]()
+      // 0x00, 0x04, 0x08, 0x0C, 0x10, 0x14 (taken to 0x24), 0x24, 0x28, 0x2C, 0x30, 0x34 (jumps to 0x48), 0x48
+      for (_ <- 0 until 12) {
+        trace += captureCommitEvent(dut)
+        dut.clock.step(1)
+      }
+      recordCommitTrace("single_cycle_pipe_prog3", trace)
+    }
+  }
 }
