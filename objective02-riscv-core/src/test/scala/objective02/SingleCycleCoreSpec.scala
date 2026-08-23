@@ -22,6 +22,24 @@ class SingleCycleCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Ma
     }
   }
 
+  // Helper to serialize cycle commit event
+  def captureCommitEvent(dut: SingleCycleCore): String = {
+    val pc = dut.io.debugPc.peek().litValue
+    val inst = dut.io.debugInstruction.peek().litValue
+    val rd = dut.io.debugRd.peek().litValue
+    val regWrite = dut.io.debugRegWrite.peek().litToBoolean
+    val writeData = dut.io.debugWriteData.peek().litValue
+    val memRead = dut.io.debugMemRead.peek().litToBoolean
+    val memReadReq = dut.io.debugMemReadReq.peek().litToBoolean
+    val memWrite = dut.io.debugMemWrite.peek().litToBoolean
+    val memWriteReq = dut.io.debugMemWriteReq.peek().litToBoolean
+    val memAddr = dut.io.debugMemAddress.peek().litValue
+    val memWriteData = dut.io.debugMemWriteData.peek().litValue
+    val illegal = dut.io.debugIllegal.peek().litToBoolean
+
+    s"""  {"pc": $pc, "instruction": $inst, "rd": $rd, "regWrite": $regWrite, "writeData": $writeData, "memRead": $memRead, "memReadReq": $memReadReq, "memWrite": $memWrite, "memWriteReq": $memWriteReq, "memAddress": $memAddr, "memWriteData": $memWriteData, "illegal": $illegal}"""
+  }
+
   // -------------------------------------------------------------
   // Benchmark Program 1: Arithmetic and Logical Matrix
   // -------------------------------------------------------------
@@ -41,19 +59,7 @@ class SingleCycleCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Ma
       val trace = scala.collection.mutable.ArrayBuffer[String]()
 
       for (cycle <- 0 until 8) {
-        val pc = dut.io.debugPc.peek().litValue
-        val inst = dut.io.debugInstruction.peek().litValue
-        val rd = dut.io.debugRd.peek().litValue
-        val regWrite = dut.io.debugRegWrite.peek().litToBoolean
-        val writeData = dut.io.debugWriteData.peek().litValue
-        val memRead = dut.io.debugMemRead.peek().litToBoolean
-        val memWrite = dut.io.debugMemWrite.peek().litToBoolean
-        val memAddr = dut.io.debugMemAddress.peek().litValue
-        val memWriteData = dut.io.debugMemWriteData.peek().litValue
-        val illegal = dut.io.debugIllegal.peek().litToBoolean
-
-        trace += s"""  {"pc": $pc, "instruction": $inst, "rd": $rd, "regWrite": $regWrite, "writeData": $writeData, "memRead": $memRead, "memWrite": $memWrite, "memAddress": $memAddr, "memWriteData": $memWriteData, "illegal": $illegal}"""
-
+        trace += captureCommitEvent(dut)
         dut.clock.step(1)
       }
       recordCommitTrace("chisel_trace_prog1", trace)
@@ -79,19 +85,7 @@ class SingleCycleCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Ma
       val trace = scala.collection.mutable.ArrayBuffer[String]()
 
       for (cycle <- 0 until 18) {
-        val pc = dut.io.debugPc.peek().litValue
-        val inst = dut.io.debugInstruction.peek().litValue
-        val rd = dut.io.debugRd.peek().litValue
-        val regWrite = dut.io.debugRegWrite.peek().litToBoolean
-        val writeData = dut.io.debugWriteData.peek().litValue
-        val memRead = dut.io.debugMemRead.peek().litToBoolean
-        val memWrite = dut.io.debugMemWrite.peek().litToBoolean
-        val memAddr = dut.io.debugMemAddress.peek().litValue
-        val memWriteData = dut.io.debugMemWriteData.peek().litValue
-        val illegal = dut.io.debugIllegal.peek().litToBoolean
-
-        trace += s"""  {"pc": $pc, "instruction": $inst, "rd": $rd, "regWrite": $regWrite, "writeData": $writeData, "memRead": $memRead, "memWrite": $memWrite, "memAddress": $memAddr, "memWriteData": $memWriteData, "illegal": $illegal}"""
-
+        trace += captureCommitEvent(dut)
         dut.clock.step(1)
       }
       recordCommitTrace("chisel_trace_prog2", trace)
@@ -122,19 +116,7 @@ class SingleCycleCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Ma
       val trace = scala.collection.mutable.ArrayBuffer[String]()
 
       for (cycle <- 0 until 11) {
-        val pc = dut.io.debugPc.peek().litValue
-        val inst = dut.io.debugInstruction.peek().litValue
-        val rd = dut.io.debugRd.peek().litValue
-        val regWrite = dut.io.debugRegWrite.peek().litToBoolean
-        val writeData = dut.io.debugWriteData.peek().litValue
-        val memRead = dut.io.debugMemRead.peek().litToBoolean
-        val memWrite = dut.io.debugMemWrite.peek().litToBoolean
-        val memAddr = dut.io.debugMemAddress.peek().litValue
-        val memWriteData = dut.io.debugMemWriteData.peek().litValue
-        val illegal = dut.io.debugIllegal.peek().litToBoolean
-
-        trace += s"""  {"pc": $pc, "instruction": $inst, "rd": $rd, "regWrite": $regWrite, "writeData": $writeData, "memRead": $memRead, "memWrite": $memWrite, "memAddress": $memAddr, "memWriteData": $memWriteData, "illegal": $illegal}"""
-
+        trace += captureCommitEvent(dut)
         dut.clock.step(1)
       }
       recordCommitTrace("chisel_trace_prog3", trace)
@@ -162,19 +144,7 @@ class SingleCycleCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Ma
       val trace = scala.collection.mutable.ArrayBuffer[String]()
 
       for (cycle <- 0 until 7) {
-        val pc = dut.io.debugPc.peek().litValue
-        val inst = dut.io.debugInstruction.peek().litValue
-        val rd = dut.io.debugRd.peek().litValue
-        val regWrite = dut.io.debugRegWrite.peek().litToBoolean
-        val writeData = dut.io.debugWriteData.peek().litValue
-        val memRead = dut.io.debugMemRead.peek().litToBoolean
-        val memWrite = dut.io.debugMemWrite.peek().litToBoolean
-        val memAddr = dut.io.debugMemAddress.peek().litValue
-        val memWriteData = dut.io.debugMemWriteData.peek().litValue
-        val illegal = dut.io.debugIllegal.peek().litToBoolean
-
-        trace += s"""  {"pc": $pc, "instruction": $inst, "rd": $rd, "regWrite": $regWrite, "writeData": $writeData, "memRead": $memRead, "memWrite": $memWrite, "memAddress": $memAddr, "memWriteData": $memWriteData, "illegal": $illegal}"""
-
+        trace += captureCommitEvent(dut)
         dut.clock.step(1)
       }
       recordCommitTrace("chisel_trace_prog4", trace)
@@ -201,19 +171,7 @@ class SingleCycleCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Ma
       val trace = scala.collection.mutable.ArrayBuffer[String]()
 
       for (cycle <- 0 until 7) {
-        val pc = dut.io.debugPc.peek().litValue
-        val inst = dut.io.debugInstruction.peek().litValue
-        val rd = dut.io.debugRd.peek().litValue
-        val regWrite = dut.io.debugRegWrite.peek().litToBoolean
-        val writeData = dut.io.debugWriteData.peek().litValue
-        val memRead = dut.io.debugMemRead.peek().litToBoolean
-        val memWrite = dut.io.debugMemWrite.peek().litToBoolean
-        val memAddr = dut.io.debugMemAddress.peek().litValue
-        val memWriteData = dut.io.debugMemWriteData.peek().litValue
-        val illegal = dut.io.debugIllegal.peek().litToBoolean
-
-        trace += s"""  {"pc": $pc, "instruction": $inst, "rd": $rd, "regWrite": $regWrite, "writeData": $writeData, "memRead": $memRead, "memWrite": $memWrite, "memAddress": $memAddr, "memWriteData": $memWriteData, "illegal": $illegal}"""
-
+        trace += captureCommitEvent(dut)
         dut.clock.step(1)
       }
       recordCommitTrace("chisel_trace_prog5", trace)

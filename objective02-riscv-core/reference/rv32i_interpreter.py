@@ -14,7 +14,9 @@ class CommitEvent(NamedTuple):
     regWrite: bool
     writeData: int
     memRead: bool
+    memReadReq: bool
     memWrite: bool
+    memWriteReq: bool
     memAddress: int
     memWriteData: int
     illegal: bool
@@ -65,7 +67,9 @@ class RV32Interpreter:
         reg_write = False
         write_data = 0
         mem_read = False
+        mem_read_req = False
         mem_write = False
+        mem_write_req = False
         mem_addr = 0
         mem_write_data = 0
         illegal = False
@@ -141,13 +145,14 @@ class RV32Interpreter:
                 illegal = True
 
         elif opcode == 0x03: # Load
-            mem_read = True
+            mem_read_req = True
             mem_addr = (val1 + imm_i) & 0xFFFFFFFF
             is_half = (funct3 == 1 or funct3 == 5)
             is_word = (funct3 == 2)
             misaligned = (is_half and (mem_addr & 1 != 0)) or (is_word and (mem_addr & 3 != 0))
 
             if mem_addr < len(self.memory) and not misaligned:
+                mem_read = True
                 reg_write = True
                 if funct3 == 0: # LB
                     write_data = self.to_signed(self.memory[mem_addr], 8) & 0xFFFFFFFF
@@ -161,13 +166,15 @@ class RV32Interpreter:
                 elif funct3 == 5: # LHU
                     write_data = int.from_bytes(self.memory[mem_addr:mem_addr+2], 'little', signed=False)
                 else:
+                    mem_read = False
                     reg_write = False
                     illegal = True
             else:
+                mem_read = False
                 reg_write = False
 
         elif opcode == 0x23: # Store
-            mem_write = True
+            mem_write_req = True
             mem_addr = (val1 + imm_s) & 0xFFFFFFFF
             mem_write_data = val2
             is_half = (funct3 == 1)
@@ -175,6 +182,7 @@ class RV32Interpreter:
             misaligned = (is_half and (mem_addr & 1 != 0)) or (is_word and (mem_addr & 3 != 0))
 
             if mem_addr < len(self.memory) and not misaligned:
+                mem_write = True
                 if funct3 == 0: # SB
                     self.memory[mem_addr] = val2 & 0xFF
                 elif funct3 == 1 and mem_addr + 2 <= len(self.memory): # SH
@@ -182,9 +190,10 @@ class RV32Interpreter:
                 elif funct3 == 2 and mem_addr + 4 <= len(self.memory): # SW
                     self.memory[mem_addr:mem_addr+4] = (val2 & 0xFFFFFFFF).to_bytes(4, 'little')
                 else:
+                    mem_write = False
                     illegal = True
             else:
-                pass # Suppress misaligned/out-of-bounds write
+                mem_write = False
 
         elif opcode == 0x63: # Branch
             take = False
@@ -226,7 +235,9 @@ class RV32Interpreter:
         if illegal:
             reg_write = False
             mem_read = False
+            mem_read_req = False
             mem_write = False
+            mem_write_req = False
 
         if reg_write and rd != 0:
             self.regs[rd] = write_data
@@ -241,7 +252,9 @@ class RV32Interpreter:
             regWrite=reg_write and rd != 0,
             writeData=write_data,
             memRead=mem_read,
+            memReadReq=mem_read_req,
             memWrite=mem_write,
+            memWriteReq=mem_write_req,
             memAddress=mem_addr,
             memWriteData=mem_write_data,
             illegal=illegal

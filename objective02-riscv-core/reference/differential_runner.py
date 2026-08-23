@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
 Genuine Cross-Model Differential Verification Runner.
-Compares the cycle-by-cycle architectural commit traces produced by the Chisel RTL
-simulation (SingleCycleCore) against the Python reference interpreter (RV32Interpreter).
+Regenerates and compares cycle-by-cycle architectural commit traces produced by
+the Chisel RTL simulation (SingleCycleCore) against the Python reference emulator (RV32Interpreter).
 """
 
+import argparse
 import json
 import os
 import subprocess
@@ -89,20 +90,24 @@ PROGRAMS = {
     }
 }
 
-def ensure_chisel_traces():
-    missing = [p["trace_file"] for p in PROGRAMS.values() if not os.path.exists(p["trace_file"])]
-    if missing:
-        print(f"[Differential Runner] Chisel trace files missing: {missing}")
-        print("[Differential Runner] Running sbt test to generate Chisel hardware commit traces...")
-        cmd = ["sbt", "--batch", "testOnly objective02.SingleCycleCoreSpec"]
-        res = subprocess.run(cmd, check=True)
-        if res.returncode != 0:
-            print("[Differential Runner] Error: sbt test execution failed.")
-            sys.exit(1)
+def generate_chisel_traces():
+    print("[Differential Runner] Executing sbt test to generate fresh Chisel hardware commit traces...")
+    cmd = ["sbt", "--batch", "testOnly objective02.SingleCycleCoreSpec"]
+    res = subprocess.run(cmd, check=True)
+    if res.returncode != 0:
+        print("[Differential Runner] Error: sbt test execution failed.")
+        sys.exit(1)
 
-def run_differential_comparison():
-    ensure_chisel_traces()
-    print("=" * 80)
+def run_differential_comparison(use_existing_traces: bool = False):
+    if not use_existing_traces:
+        generate_chisel_traces()
+    else:
+        missing = [p["trace_file"] for p in PROGRAMS.values() if not os.path.exists(p["trace_file"])]
+        if missing:
+            print(f"[Differential Runner] Trace files missing: {missing}. Generating them...")
+            generate_chisel_traces()
+
+    print("\n" + "=" * 80)
     print("GENUINE DIFFERENTIAL VERIFICATION: CHISEL RTL <-> PYTHON REFERENCE EMULATOR")
     print("=" * 80)
 
@@ -135,9 +140,14 @@ def run_differential_comparison():
                     f"Cycle {i} WriteData mismatch at PC 0x{py_ev.pc:02x}: Python={hex(py_ev.writeData)}, Chisel={hex(ch_ev['writeData'])}"
                 )
             assert py_ev.memRead == ch_ev["memRead"], f"Cycle {i} MemRead mismatch"
+            assert py_ev.memReadReq == ch_ev["memReadReq"], f"Cycle {i} MemReadReq mismatch"
             assert py_ev.memWrite == ch_ev["memWrite"], f"Cycle {i} MemWrite mismatch"
+            assert py_ev.memWriteReq == ch_ev["memWriteReq"], f"Cycle {i} MemWriteReq mismatch"
+            if py_ev.memRead or py_ev.memWrite or py_ev.memReadReq or py_ev.memWriteReq:
+                assert py_ev.memAddress == ch_ev["memAddress"], (
+                    f"Cycle {i} MemAddress mismatch: Py={py_ev.memAddress}, Ch={ch_ev['memAddress']}"
+                )
             if py_ev.memWrite:
-                assert py_ev.memAddress == ch_ev["memAddress"], f"Cycle {i} MemAddress mismatch"
                 assert (py_ev.memWriteData & 0xFFFFFFFF) == (ch_ev["memWriteData"] & 0xFFFFFFFF), f"Cycle {i} MemWriteData mismatch"
             assert py_ev.illegal == ch_ev["illegal"], f"Cycle {i} Illegal status mismatch"
 
@@ -149,4 +159,7 @@ def run_differential_comparison():
     print("=" * 80)
 
 if __name__ == "__main__":
-    run_differential_comparison()
+    parser = argparse.ArgumentParser(description="RV32I Differential Verification Runner")
+    parser.add_argument("--use-existing-traces", action="store_true", help="Skip running sbt test and use existing JSON trace files")
+    args = parser.parse_args()
+    run_differential_comparison(use_existing_traces=args.use_existing_traces)
