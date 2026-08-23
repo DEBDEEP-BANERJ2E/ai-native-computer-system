@@ -39,15 +39,14 @@ Welcome to **Objective 2** of the AI-Native Computer System project.
                               ▼
        Objective 1 ───────► ┌────────────────────┐
        HCLA                 │ EX — Execute       │
-       ALU                  │ ALU / MUL          │
+       ALU                  │ ALU / MUL / DIV    │
        Booth-Wallace        │ Branch Compare     │
                             └─────────┬──────────┘
                                       │ EX/MEM
                                       ▼
                            ┌─────────────────────┐
                            │ MEM — Memory        │
-                           │ Capability Check    │
-                           │ Bounds/Permissions  │
+                           │ Data Memory Access  │
                            └──────────┬──────────┘
                                       │ MEM/WB
                                       ▼
@@ -58,11 +57,11 @@ Welcome to **Objective 2** of the AI-Native Computer System project.
                               +
              ┌─────────────────────────────────────┐
              │ Forwarding / Hazard Detection       │
-             │ MMIO / telemetry_read               │
-             │ sched_hint                          │
-             │ security_violation                  │
              └─────────────────────────────────────┘
 ```
+
+> **Future Phase 6/7 Capabilities & Telemetry Interfaces:**
+> Capability checks • MMIO • telemetry • sched_hint • security_violation
 
 ---
 
@@ -73,7 +72,7 @@ objective02-riscv-core/
 ├── build.sbt
 ├── README.md
 ├── reference/
-│   ├── rv32i_interpreter.py       # Exact RV32I + MUL Python reference emulator
+│   ├── rv32i_interpreter.py       # RV32IM Python reference emulator
 │   └── differential_runner.py     # Differential verification runner (Python vs Chisel commit traces)
 ├── src/
 │   ├── main/scala/
