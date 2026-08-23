@@ -127,10 +127,12 @@ class PipelinedCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Matc
     test(new PipelinedCore(initialProgram = progLoadUse)) { dut =>
       val retiredVals = scala.collection.mutable.ArrayBuffer[BigInt]()
       var sawLoadUseStall = false
+      var loadUseStallCount = 0
 
       for (_ <- 0 until 14) {
         if (dut.io.loadUseHazard.peek().litToBoolean) {
           sawLoadUseStall = true
+          loadUseStallCount += 1
         }
         if (dut.io.commit.valid.peek().litToBoolean && dut.io.commit.regWrite.peek().litToBoolean) {
           retiredVals += dut.io.commit.writeData.peek().litValue
@@ -139,6 +141,7 @@ class PipelinedCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Matc
       }
 
       sawLoadUseStall shouldBe true
+      loadUseStallCount shouldBe 1
       retiredVals should contain (BigInt(42))
       retiredVals should contain (BigInt(52)) // 42 + 10 = 52
     }
@@ -172,6 +175,72 @@ class PipelinedCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Matc
       }
 
       sawX3_42 shouldBe true
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Test 4.1: Load-Use Hazard into Branch (lw -> beq)
+  // -------------------------------------------------------------
+  it should "detect Load-Use hazard and forward loaded data into Branch unit" in {
+    val progLwBeq = Seq(
+      BigInt("00a00093", 16), // 0x00: addi x1, x0, 10
+      BigInt("00102023", 16), // 0x04: sw   x1, 0(x0)  (store 10 at addr 0)
+      BigInt("00002283", 16), // 0x08: lw   x5, 0(x0)  (load 10 into x5)
+      BigInt("00508463", 16), // 0x0C: beq  x1, x5, 8  (LOAD-USE on x5! Stall 1 cycle, then forward MEM/WB(10) == x1(10) -> jumps to 0x14)
+      BigInt("3e700713", 16), // 0x10: addi x14, x0, 999 (killed)
+      BigInt("04d00393", 16)  // 0x14: addi x7, x0, 77   (target reached!)
+    )
+
+    test(new PipelinedCore(initialProgram = progLwBeq)) { dut =>
+      val retiredPcs = scala.collection.mutable.ArrayBuffer[BigInt]()
+      var loadUseStallCount = 0
+
+      for (_ <- 0 until 18) {
+        if (dut.io.loadUseHazard.peek().litToBoolean) {
+          loadUseStallCount += 1
+        }
+        if (dut.io.commit.valid.peek().litToBoolean) {
+          retiredPcs += dut.io.commit.pc.peek().litValue
+        }
+        dut.clock.step(1)
+      }
+
+      loadUseStallCount shouldBe 1
+      retiredPcs should not contain (BigInt(0x10))
+      retiredPcs should contain (BigInt(0x14))
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Test 4.2: Load-Use Hazard into JALR (lw -> jalr)
+  // -------------------------------------------------------------
+  it should "detect Load-Use hazard and forward loaded data into JALR unit" in {
+    val progLwJalr = Seq(
+      BigInt("01400093", 16), // 0x00: addi x1, x0, 0x14
+      BigInt("00102023", 16), // 0x04: sw   x1, 0(x0)  (store 0x14 at addr 0)
+      BigInt("00002283", 16), // 0x08: lw   x5, 0(x0)  (load 0x14 into x5)
+      BigInt("00028067", 16), // 0x0C: jalr x0, 0(x5)  (LOAD-USE on x5! Stall 1 cycle, then forward MEM/WB(0x14) -> jumps to 0x14)
+      BigInt("3e700713", 16), // 0x10: addi x14, x0, 999 (killed)
+      BigInt("04d00393", 16)  // 0x14: addi x7, x0, 77   (target reached!)
+    )
+
+    test(new PipelinedCore(initialProgram = progLwJalr)) { dut =>
+      val retiredPcs = scala.collection.mutable.ArrayBuffer[BigInt]()
+      var loadUseStallCount = 0
+
+      for (_ <- 0 until 18) {
+        if (dut.io.loadUseHazard.peek().litToBoolean) {
+          loadUseStallCount += 1
+        }
+        if (dut.io.commit.valid.peek().litToBoolean) {
+          retiredPcs += dut.io.commit.pc.peek().litValue
+        }
+        dut.clock.step(1)
+      }
+
+      loadUseStallCount shouldBe 1
+      retiredPcs should not contain (BigInt(0x10))
+      retiredPcs should contain (BigInt(0x14))
     }
   }
 
