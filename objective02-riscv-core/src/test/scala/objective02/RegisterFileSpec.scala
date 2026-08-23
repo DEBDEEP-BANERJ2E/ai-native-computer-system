@@ -57,26 +57,25 @@ class RegisterFileSpec extends AnyFlatSpec with ChiselScalatestTester with Match
     }
   }
 
-  it should "support internal same-cycle write-first forwarding" in {
+  it should "synchronously commit writes on clock edge and support dual-port reading" in {
     test(new RegisterFile) { dut =>
       dut.io.writeEnable.poke(true.B)
       dut.io.rdAddress.poke(7.U)
       dut.io.writeData.poke("hCAFE1234".U)
 
-      // Simultaneously read rs1=7 and rs2=7 on the same clock cycle
+      // Before clock edge, register 7 still holds initial value 0
       dut.io.rs1Address.poke(7.U)
-      dut.io.rs2Address.poke(7.U)
+      dut.io.rs1Data.expect(0.U)
 
-      // Must see the newly written value immediately via internal forwarding
-      dut.io.rs1Data.expect("hCAFE1234".U)
-      dut.io.rs2Data.expect("hCAFE1234".U)
-
+      // Step clock to commit write
       dut.clock.step(1)
 
-      // After clock tick, it persists in the register array
+      // After clock tick, value is committed and readable on both ports
       dut.io.writeEnable.poke(false.B)
       dut.io.rs1Address.poke(7.U)
+      dut.io.rs2Address.poke(7.U)
       dut.io.rs1Data.expect("hCAFE1234".U)
+      dut.io.rs2Data.expect("hCAFE1234".U)
     }
   }
 }

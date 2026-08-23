@@ -28,20 +28,16 @@ class RegisterFile extends Module {
     regs(io.rdAddress - 1.U) := io.writeData
   }
 
-  // Asynchronous Read Port 1 with Same-Cycle Internal Forwarding
+  // Asynchronous Read Port 1 (x0 hardwired to 0)
   when(io.rs1Address === 0.U) {
     io.rs1Data := 0.U(32.W)
-  }.elsewhen(io.writeEnable && io.rdAddress === io.rs1Address) {
-    io.rs1Data := io.writeData // Same-cycle write-first forwarding
   }.otherwise {
     io.rs1Data := regs(io.rs1Address - 1.U)
   }
 
-  // Asynchronous Read Port 2 with Same-Cycle Internal Forwarding
+  // Asynchronous Read Port 2 (x0 hardwired to 0)
   when(io.rs2Address === 0.U) {
     io.rs2Data := 0.U(32.W)
-  }.elsewhen(io.writeEnable && io.rdAddress === io.rs2Address) {
-    io.rs2Data := io.writeData // Same-cycle write-first forwarding
   }.otherwise {
     io.rs2Data := regs(io.rs2Address - 1.U)
   }
