@@ -129,9 +129,19 @@ RV32M_BENCHMARKS = {
             0x0220e4b3, # 0x48: rem x9, x1, x2
             0xfff00093, # 0x4C: addi x1, x0, -1
             0x00300113, # 0x50: addi x2, x0, 3
-            0x0220f533  # 0x54: remu x10, x1, x2
+            0x0220f533, # 0x54: remu x10, x1, x2
+            0x022085b3, # 0x58: mul x11, x1, x2
+            0x00500093, # 0x5C: addi x1, x0, 5
+            0x0200c633, # 0x60: div x12, x1, x0
+            0x0200e6b3, # 0x64: rem x13, x1, x0
+            0x0200d733, # 0x68: divu x14, x1, x0
+            0x0200f7b3, # 0x6C: remu x15, x1, x0
+            0x800000b7, # 0x70: lui x1, 0x80000
+            0xfff00113, # 0x74: addi x2, x0, -1
+            0x0220c833, # 0x78: div x16, x1, x2
+            0x0220e8b3  # 0x7C: rem x17, x1, x2
         ],
-        "cycles": 22, # retirement events count = 22
+        "cycles": 32, # retirement events count = 32
         "pipe_trace": "test_traces/progDiv.json"
     }
 }

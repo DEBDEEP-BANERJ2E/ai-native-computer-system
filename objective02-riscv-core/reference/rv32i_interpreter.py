@@ -133,7 +133,10 @@ class RV32Interpreter:
                     elif s_val1 == -2147483648 and s_val2 == -1:
                         write_data = 0x80000000
                     else:
-                        write_data = int(s_val1 / s_val2) & 0xFFFFFFFF
+                        q = abs(s_val1) // abs(s_val2)
+                        if (s_val1 < 0) != (s_val2 < 0):
+                            q = -q
+                        write_data = q & 0xFFFFFFFF
                 elif funct3 == 5: # DIVU
                     if val2 == 0:
                         write_data = 0xFFFFFFFF
@@ -145,8 +148,10 @@ class RV32Interpreter:
                     elif s_val1 == -2147483648 and s_val2 == -1:
                         write_data = 0
                     else:
-                        quot = int(s_val1 / s_val2)
-                        write_data = (s_val1 - quot * s_val2) & 0xFFFFFFFF
+                        q = abs(s_val1) // abs(s_val2)
+                        if (s_val1 < 0) != (s_val2 < 0):
+                            q = -q
+                        write_data = (s_val1 - q * s_val2) & 0xFFFFFFFF
                 elif funct3 == 7: # REMU
                     if val2 == 0:
                         write_data = val1

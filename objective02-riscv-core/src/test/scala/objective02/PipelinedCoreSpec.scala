@@ -453,30 +453,45 @@ class PipelinedCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Matc
       BigInt("0220e4b3", 16), // 0x48: rem x9, x1, x2 (x9 = 1)
       BigInt("fff00093", 16), // 0x4C: addi x1, x0, -1
       BigInt("00300113", 16), // 0x50: addi x2, x0, 3
-      BigInt("0220f533", 16)  // 0x54: remu x10, x1, x2 (x10 = 0)
+      BigInt("0220f533", 16), // 0x54: remu x10, x1, x2 (x10 = 0)
+      BigInt("022085b3", 16), // 0x58: mul x11, x1, x2 (x11 = -3)
+      BigInt("00500093", 16), // 0x5C: addi x1, x0, 5
+      BigInt("0200c633", 16), // 0x60: div x12, x1, x0 (x12 = -1)
+      BigInt("0200e6b3", 16), // 0x64: rem x13, x1, x0 (x13 = 5)
+      BigInt("0200d733", 16), // 0x68: divu x14, x1, x0 (x14 = -1)
+      BigInt("0200f7b3", 16), // 0x6C: remu x15, x1, x0 (x15 = 5)
+      BigInt("800000b7", 16), // 0x70: lui x1, 0x80000
+      BigInt("fff00113", 16), // 0x74: addi x2, x0, -1
+      BigInt("0220c833", 16), // 0x78: div x16, x1, x2 (x16 = INT_MIN)
+      BigInt("0220e8b3", 16)  // 0x7C: rem x17, x1, x2 (x17 = 0)
     )
 
     test(new PipelinedCore(initialProgram = progDiv)) { dut =>
       val retiredPcs = scala.collection.mutable.ArrayBuffer[BigInt]()
       val retiredVals = scala.collection.mutable.ArrayBuffer[BigInt]()
-      val trace = scala.collection.mutable.ArrayBuffer[String]()
-
-      for (_ <- 0 until 300) {
-        val ret = captureRetirementEvent(dut)
-        if (ret.isDefined) {
+      val expectedPcs = Seq(
+        0x00, 0x04, 0x08, 0x0C, 0x10, 0x14, 0x18, 0x1C, 0x20, 0x24, 0x28, 0x2C, 0x30, 0x34, 0x38, 0x3C, 0x40, 0x44, 0x48, 0x4C, 0x50, 0x54, 0x58, 0x5C, 0x60, 0x64, 0x68, 0x6C, 0x70, 0x74, 0x78, 0x7C
+      ).map(BigInt(_))
+        val trace = scala.collection.mutable.ArrayBuffer[String]()
+        var cycles = 0
+        while (retiredPcs.length < expectedPcs.length && cycles < 800) {
+          val ret = captureRetirementEvent(dut)
+          if (ret.isDefined) {
+            retiredPcs += dut.io.commit.pc.peek().litValue
+            retiredVals += dut.io.commit.writeData.peek().litValue
+            trace += ret.get
+          }
+          dut.clock.step(1)
+          cycles += 1
+        }
+        // Capture any final retirement event if present
+        val finalRet = captureRetirementEvent(dut)
+        if (finalRet.isDefined) {
           retiredPcs += dut.io.commit.pc.peek().litValue
           retiredVals += dut.io.commit.writeData.peek().litValue
-          trace += ret.get
+          trace += finalRet.get
         }
-        dut.clock.step(1)
-      }
-
-      recordPipelineTrace("progDiv", trace)
-
-      val expectedPcs = Seq(
-        0x00, 0x04, 0x08, 0x0C, 0x10, 0x14, 0x18, 0x1C, 0x20, 0x24, 0x28, 0x2C, 0x30, 0x34, 0x38, 0x3C, 0x40, 0x44, 0x48, 0x4C, 0x50, 0x54
-      ).map(BigInt(_))
-
+        recordPipelineTrace("progDiv", trace)
       val expectedVals = Seq(
         BigInt("FFFFFFFFFFFFFFFE", 16) & 0xFFFFFFFFL, // x1 = -2
         BigInt(3), // x2 = 3
@@ -499,7 +514,17 @@ class PipelinedCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Matc
         BigInt(1), // x9 = 1
         BigInt("FFFFFFFFFFFFFFFF", 16) & 0xFFFFFFFFL, // x1 = -1
         BigInt(3), // x2 = 3
-        BigInt(0) // x10 = 0
+        BigInt(0), // x10 = 0
+        BigInt("FFFFFFFD", 16), // x11 = -3
+        BigInt(5), // x1 = 5
+        BigInt("FFFFFFFF", 16), // x12 = -1
+        BigInt(5), // x13 = 5
+        BigInt("FFFFFFFF", 16), // x14 = -1
+        BigInt(5), // x15 = 5
+        BigInt("80000000", 16), // x1 = 0x80000000
+        BigInt("FFFFFFFF", 16), // x2 = -1
+        BigInt("80000000", 16), // x16 = 0x80000000
+        BigInt(0) // x17 = 0
       )
 
       retiredPcs shouldBe expectedPcs

@@ -2,12 +2,21 @@
 
 Welcome to **Objective 2** of the AI-Native Computer System project.
 
-- **Current Implementation**: Verified **Single-Cycle RISC-V RV32I + MUL Reference Core** ([`SingleCycleCore.scala`](file:///Users/debdeepbanerjee/Desktop/ai-native-computer-system/objective02-riscv-core/src/main/scala/objective02/core/SingleCycleCore.scala)).
-- **Target Architecture**: **5-Stage Pipelined RV32IM Processor** with hardware-enforced CHERI-lite capability security and cross-layer OS/telemetry interfaces (Phases 3–7).
+- **Current Implementation**:
+  - Frozen SingleCycleCore reference
+  - Five-stage RV32IM PipelinedCore
+  - EX/MEM and MEM/WB forwarding
+  - Load-use interlock
+  - Branch/JAL/JALR flushing
+  - Full RV32M multiplication
+  - Multi-cycle iterative DIV/DIVU/REM/REMU
+  - Architectural retirement interface
+  - Python/SingleCycle/Pipeline differential verification
+- **Target Architecture**: Hardware-enforced CHERI-lite capability security and cross-layer OS/telemetry interfaces (Phases 6–7).
 
 ---
 
-## Target 5-Stage Pipeline Architecture
+## 5-Stage Pipeline Architecture
 
 ```
                          ┌────────────┐
@@ -71,29 +80,43 @@ objective02-riscv-core/
 │   │   └── objective02/
 │   │       ├── isa/
 │   │       │   ├── Opcodes.scala          # 7-bit opcodes, funct3, funct7 constants
-│   │       │   └── Instructions.scala      # Bitfield extractors (rd, rs1, rs2, funct3, etc.)
+│   │       │   └── Instructions.scala     # Bitfield extractors (rd, rs1, rs2, funct3, etc.)
 │   │       ├── decode/
-│   │       │   ├── ImmediateGenerator.scala# 32-bit sign-extended immediate decoder (I, S, B, U, J)
-│   │       │   ├── ControlSignals.scala    # Control word bundles, ALUOps, and MOp enums
-│   │       │   └── Decoder.scala           # Combinational instruction decoder with safety squash
+│   │       │   ├── ImmediateGenerator.scala
+│   │       │   ├── ControlSignals.scala
+│   │       │   └── Decoder.scala          # Full-M decoder
 │   │       ├── datapath/
-│   │       │   ├── RegisterFile.scala      # 32 × 32-bit registers (hardwired x0 = 0)
-│   │       │   ├── ProgramCounter.scala    # 32-bit PC register with REDIRECT > STALL priority
-│   │       │   └── BranchJumpUnit.scala    # Branch evaluations and JAL/JALR target math
+│   │       │   ├── RegisterFile.scala     # 32 × 32-bit registers (hardwired x0 = 0)
+│   │       │   ├── ProgramCounter.scala
+│   │       │   └── BranchJumpUnit.scala
 │   │       ├── memory/
-│   │       │   ├── InstructionMemory.scala # Combinational ROM with preloading and NOP fallback
-│   │       │   └── DataMemory.scala        # Byte-addressed little-endian RAM with alignment checks
+│   │       │   ├── InstructionMemory.scala
+│   │       │   └── DataMemory.scala
+│   │       ├── execute/
+│   │       │   ├── RV32MMultiplier.scala  # Reuses Booth-Wallace multiplier
+│   │       │   └── IterativeDivider.scala # Multi-cycle division/remainder
+│   │       ├── pipeline/
+│   │       │   ├── PipelineRegisters.scala# Latch, stall, flush logic
+│   │       │   ├── HazardUnit.scala       # Load-use and control hazard detection
+│   │       │   ├── ForwardingUnit.scala   # EX/MEM and MEM/WB forwarding logic
+│   │       │   └── PipelinedCore.scala    # 5-stage RV32IM processor
 │   │       └── core/
-│   │           └── SingleCycleCore.scala   # Architectural reference core with commit/debug interface
+│   │           └── SingleCycleCore.scala  # Frozen reference core
 │   └── test/scala/
 │       └── objective02/
-│           ├── ImmediateGeneratorSpec.scala# Immediate format unit tests
-│           ├── DecoderSpec.scala           # Table-driven decoder and negative tests
-│           ├── RegisterFileSpec.scala      # 32-register verification and x0 hardwiring tests
-│           ├── ProgramCounterSpec.scala    # PC reset, increment, stall, and redirect tests
-│           ├── BranchJumpUnitSpec.scala    # Branch condition logic and target address tests
-│           ├── DataMemorySpec.scala        # Byte, halfword, word access, and misalignment tests
-│           └── SingleCycleCoreSpec.scala   # Full core integration benchmarks & instruction coverage
+│           ├── ImmediateGeneratorSpec.scala
+│           ├── DecoderSpec.scala
+│           ├── RegisterFileSpec.scala
+│           ├── ProgramCounterSpec.scala
+│           ├── BranchJumpUnitSpec.scala
+│           ├── DataMemorySpec.scala
+│           ├── RV32MMultiplierSpec.scala
+│           ├── IterativeDividerSpec.scala
+│           ├── HazardUnitSpec.scala
+│           ├── ForwardingUnitSpec.scala
+│           ├── PipelineRegistersSpec.scala
+│           ├── SingleCycleCoreSpec.scala
+│           └── PipelinedCoreSpec.scala
 ```
 
 ---

@@ -39,3 +39,19 @@ print("rem x9, x1, x2 :", emit_r(1, 2, 1, 6, 9, OP_R))
 print("addi x1, x0, -1 :", emit_i(-1, 0, 0, 1, OP_IMM))
 print("addi x2, x0, 3 :", emit_i(3, 0, 0, 2, OP_IMM))
 print("remu x10, x1, x2 :", emit_r(1, 2, 1, 7, 10, OP_R))
+print("mul x11, x1, x2 :", emit_r(1, 2, 1, 0, 11, OP_R))
+
+print("addi x1, x0, 5 :", emit_i(5, 0, 0, 1, OP_IMM))
+print("div x12, x1, x0 :", emit_r(1, 0, 1, 4, 12, OP_R))
+print("rem x13, x1, x0 :", emit_r(1, 0, 1, 6, 13, OP_R))
+print("divu x14, x1, x0 :", emit_r(1, 0, 1, 5, 14, OP_R))
+print("remu x15, x1, x0 :", emit_r(1, 0, 1, 7, 15, OP_R))
+
+# lui x1, 0x80000 -> U type. opcode=0x37.
+def emit_u(imm, rd, opcode):
+    inst = ((imm & 0xFFFFF) << 12) | (rd << 7) | opcode
+    return f"{inst:08x}"
+print("lui x1, 0x80000 :", emit_u(0x80000, 1, 0x37))
+print("addi x2, x0, -1 :", emit_i(-1, 0, 0, 2, OP_IMM))
+print("div x16, x1, x2 :", emit_r(1, 2, 1, 4, 16, OP_R))
+print("rem x17, x1, x2 :", emit_r(1, 2, 1, 6, 17, OP_R))
