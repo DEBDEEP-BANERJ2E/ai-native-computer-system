@@ -21,7 +21,7 @@ class InstructionMemory(val depthWords: Int = 1024, val initialProgram: Seq[BigI
     initialProgram ++ Seq.fill(depthWords - initialProgram.length)(BigInt(0x00000013L))
   }
 
-  // Synchronous ROM / memory array initialized with program
+  // Combinational instruction ROM array initialized with preloaded program
   val mem = VecInit(programPadded.map(_.U(32.W)))
 
   // Word-aligned index (address[31:2])
