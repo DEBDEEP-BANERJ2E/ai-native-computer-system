@@ -147,7 +147,47 @@ RV32M_BENCHMARKS = {
 }
 
 # =========================================================================
-# Part 2: Three Canonical Hazard-Free Programs (Preserved from Phase 3.1)
+# Part 3: Phase 6 Cross-Layer System MMIO & Hardware Telemetry Benchmark
+# Verified 2-Way: Python Reference <==> PipelinedCore
+# =========================================================================
+MMIO_BENCHMARKS = {
+    "progMMIO": {
+        "name": "Phase 6 Cross-Layer System MMIO, Telemetry & Event Counters",
+        "code": [
+            0x80002537, # 0x00: lui x10, 0x80002
+            0x80001a37, # 0x04: lui x20, 0x80001
+            0x02a00093, # 0x08: addi x1, x0, 42
+            0x00152223, # 0x0C: sw x1, 4(x10)
+            0x00452183, # 0x10: lw x3, 4(x10)
+            0x00300113, # 0x14: addi x2, x0, 3
+            0x00252423, # 0x18: sw x2, 8(x10)
+            0x00852203, # 0x1C: lw x4, 8(x10)
+            0x00a00293, # 0x20: addi x5, x0, 10
+            0x01400313, # 0x24: addi x6, x0, 20
+            0x006283b3, # 0x28: add x7, x5, x6
+            0x02628433, # 0x2C: mul x8, x5, x6
+            0x00c00493, # 0x30: addi x9, x0, 12
+            0x00802023, # 0x34: sw x8, 0(x0)
+            0x00002583, # 0x38: lw x11, 0(x0)
+            0x00958633, # 0x3C: add x12, x11, x9
+            0x025346b3, # 0x40: div x13, x6, x5
+            0x00c52703, # 0x44: lw x14, 12(x10)
+            0x01052783, # 0x48: lw x15, 16(x10)
+            0x01452803, # 0x4C: lw x16, 20(x10)
+            0x01852883, # 0x50: lw x17, 24(x10)
+            0x01c52903, # 0x54: lw x18, 28(x10)
+            0x004a2983, # 0x58: lw x19, 4(x20)
+            0x008a2a83, # 0x5C: lw x21, 8(x20)
+            0x00ca2b03, # 0x60: lw x22, 12(x20)
+            0x010a2b83  # 0x64: lw x23, 16(x20)
+        ],
+        "cycles": 26,
+        "pipe_trace": "test_traces/progMMIO.json"
+    }
+}
+
+# =========================================================================
+# Part 4: Three Canonical Hazard-Free Programs (Preserved from Phase 3.1)
 # =========================================================================
 PIPELINE_3WAY_PROGRAMS = {
     "pipe_prog1": {
@@ -362,10 +402,41 @@ def run_differential_comparison(use_existing_traces: bool = False):
         passed_canon_programs += 1
 
     print("\n" + "=" * 80)
+    print("SECTION 4: 2-WAY DIFFERENTIAL VERIFICATION ON PHASE 6 SYSTEM MMIO & TELEMETRY")
+    print("           (PYTHON REFERENCE <==> PIPELINED CORE)")
+    print("=" * 80)
+
+    total_mmio_events = 0
+    passed_mmio_programs = 0
+
+    for prog_key, prog_info in MMIO_BENCHMARKS.items():
+        print(f"\nVerifying 2-Way Parity on {prog_info['name']}...")
+        with open(prog_info["pipe_trace"], "r") as f:
+            pipe_events = json.load(f)
+
+        interp = RV32Interpreter()
+        interp.load_program(prog_info["code"])
+        py_trace = interp.run(prog_info["cycles"])
+
+        assert len(py_trace) == len(pipe_events), (
+            f"Python ({len(py_trace)}) vs PipelinedCore ({len(pipe_events)}) retirement count mismatch"
+        )
+
+        for i in range(len(py_trace)):
+            total_mmio_events += 1
+            py_ev = py_trace[i]
+            pipe_ev = pipe_events[i]
+            compare_event("Python", py_ev, "PipelinedCore", pipe_ev, i)
+
+        print(f"  [PASS] All {len(py_trace)} retirement events matched 1:1 across Python and PipelinedCore!")
+        passed_mmio_programs += 1
+
+    print("\n" + "=" * 80)
     print("DIFFERENTIAL VERIFICATION SUMMARY:")
     print(f"  1. Original 5 Benchmarks (3-Way Bit-Exact Parity): {passed_orig_programs}/{len(ORIGINAL_BENCHMARKS)} Programs ({total_orig_events} events bit-exact across Python, SingleCycleCore, and PipelinedCore)")
     print(f"  2. RV32M Benchmarks      (2-Way Bit-Exact Parity): {passed_rv32m_programs}/{len(RV32M_BENCHMARKS)} Programs ({total_rv32m_events} events bit-exact across Python and PipelinedCore)")
     print(f"  3. Canonical Benchmarks  (3-Way Bit-Exact Parity): {passed_canon_programs}/{len(PIPELINE_3WAY_PROGRAMS)} Programs ({total_canon_events} events bit-exact across Python, SingleCycleCore, and PipelinedCore)")
+    print(f"  4. System MMIO Benchmarks(2-Way Bit-Exact Parity): {passed_mmio_programs}/{len(MMIO_BENCHMARKS)} Programs ({total_mmio_events} events bit-exact across Python and PipelinedCore)")
     print("=" * 80)
 
 if __name__ == "__main__":

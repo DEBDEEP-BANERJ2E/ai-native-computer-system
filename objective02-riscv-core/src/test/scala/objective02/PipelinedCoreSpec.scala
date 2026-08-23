@@ -531,4 +531,68 @@ class PipelinedCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Matc
       retiredVals shouldBe expectedVals
     }
   }
+
+  // -------------------------------------------------------------
+  // Test 14: Phase 6 Cross-Layer System MMIO, Telemetry, and Counters
+  // -------------------------------------------------------------
+  it should "support software RW to PROCESS_BEHAVIOR_CLASS and SCHED_HINT and expose telemetry and counters via MMIO" in {
+    val progMMIO = Seq(
+      BigInt("80002537", 16), // 0x00: lui x10, 0x80002
+      BigInt("80001a37", 16), // 0x04: lui x20, 0x80001
+      BigInt("02a00093", 16), // 0x08: addi x1, x0, 42
+      BigInt("00152223", 16), // 0x0C: sw x1, 4(x10) (write PROCESS_BEHAVIOR_CLASS)
+      BigInt("00452183", 16), // 0x10: lw x3, 4(x10) (readback 42)
+      BigInt("00300113", 16), // 0x14: addi x2, x0, 3
+      BigInt("00252423", 16), // 0x18: sw x2, 8(x10) (write SCHED_HINT)
+      BigInt("00852203", 16), // 0x1C: lw x4, 8(x10) (readback 3)
+      BigInt("00a00293", 16), // 0x20: addi x5, x0, 10
+      BigInt("01400313", 16), // 0x24: addi x6, x0, 20
+      BigInt("006283b3", 16), // 0x28: add x7, x5, x6 (30)
+      BigInt("02628433", 16), // 0x2C: mul x8, x5, x6 (200)
+      BigInt("00c00493", 16), // 0x30: addi x9, x0, 12
+      BigInt("00802023", 16), // 0x34: sw x8, 0(x0) (RAM write)
+      BigInt("00002583", 16), // 0x38: lw x11, 0(x0) (RAM read -> load-use hazard on next inst)
+      BigInt("00958633", 16), // 0x3C: add x12, x11, x9 (212)
+      BigInt("025346b3", 16), // 0x40: div x13, x6, x5 (2)
+      BigInt("00c52703", 16), // 0x44: lw x14, 12(x10) (read RETIRED_COUNT)
+      BigInt("01052783", 16), // 0x48: lw x15, 16(x10) (read BRANCH_TAKEN_COUNT)
+      BigInt("01452803", 16), // 0x4C: lw x16, 20(x10) (read LOAD_USE_STALL_COUNT)
+      BigInt("01852883", 16), // 0x50: lw x17, 24(x10) (read DIV_BUSY_CYCLES)
+      BigInt("01c52903", 16), // 0x54: lw x18, 28(x10) (read PIPELINE_STALL_COUNT)
+      BigInt("004a2983", 16), // 0x58: lw x19, 4(x20) (read CLA_SWITCHING)
+      BigInt("008a2a83", 16), // 0x5C: lw x21, 8(x20) (read MUL_THERMAL)
+      BigInt("00ca2b03", 16), // 0x60: lw x22, 12(x20) (read EDP_CURRENT)
+      BigInt("010a2b83", 16)  // 0x64: lw x23, 16(x20) (read EDP_CONFIG)
+    )
+
+    test(new PipelinedCore(initialProgram = progMMIO)) { dut =>
+      val expectedPcs = (0 until progMMIO.length).map(i => BigInt(i * 4))
+      val retiredPcs = scala.collection.mutable.ArrayBuffer[BigInt]()
+      val retiredVals = scala.collection.mutable.ArrayBuffer[BigInt]()
+      val trace = scala.collection.mutable.ArrayBuffer[String]()
+
+      var cycles = 0
+      while (retiredPcs.length < expectedPcs.length && cycles < 500) {
+        val ret = captureRetirementEvent(dut)
+        if (ret.isDefined) {
+          retiredPcs += dut.io.commit.pc.peek().litValue
+          retiredVals += dut.io.commit.writeData.peek().litValue
+          trace += ret.get
+        }
+        dut.clock.step(1)
+        cycles += 1
+      }
+      val finalRet = captureRetirementEvent(dut)
+      if (finalRet.isDefined) {
+        retiredPcs += dut.io.commit.pc.peek().litValue
+        retiredVals += dut.io.commit.writeData.peek().litValue
+        trace += finalRet.get
+      }
+      recordPipelineTrace("progMMIO", trace)
+
+      retiredPcs shouldBe expectedPcs
+      dut.io.processBehaviorClass.peek().litValue shouldBe 42
+      dut.io.schedHint.peek().litValue shouldBe 3
+    }
+  }
 }

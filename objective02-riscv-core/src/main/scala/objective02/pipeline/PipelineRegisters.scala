@@ -156,6 +156,12 @@ class EX_MEM_Bundle extends Bundle {
   val memWidth           = UInt(3.W)
   val wbSource           = UInt(2.W)
   val illegalInstruction = Bool()
+
+  // Telemetry metadata
+  val telemetryValid     = Bool()
+  val telemetryClaActive = Bool()
+  val telemetryMulActive = Bool()
+  val telemetryResult    = UInt(32.W)
 }
 
 class EX_MEM_Register extends Module {
@@ -182,6 +188,10 @@ class EX_MEM_Register extends Module {
     b.memWidth           := MemWidth.WORD
     b.wbSource           := WBSource.ALU
     b.illegalInstruction := false.B
+    b.telemetryValid     := false.B
+    b.telemetryClaActive := false.B
+    b.telemetryMulActive := false.B
+    b.telemetryResult    := 0.U(32.W)
     b
   })
 
@@ -200,6 +210,10 @@ class EX_MEM_Register extends Module {
     reg.memWidth           := MemWidth.WORD
     reg.wbSource           := WBSource.ALU
     reg.illegalInstruction := false.B
+    reg.telemetryValid     := false.B
+    reg.telemetryClaActive := false.B
+    reg.telemetryMulActive := false.B
+    reg.telemetryResult    := 0.U(32.W)
   }.elsewhen(!io.stall) {
     reg := io.in
   }
@@ -234,6 +248,12 @@ class MEM_WB_Bundle extends Bundle {
   val regWrite           = Bool()
   val wbSource           = UInt(2.W)
   val illegalInstruction = Bool()
+
+  // Telemetry metadata
+  val telemetryValid     = Bool()
+  val telemetryClaActive = Bool()
+  val telemetryMulActive = Bool()
+  val telemetryResult    = UInt(32.W)
 }
 
 class MEM_WB_Register extends Module {
@@ -263,6 +283,10 @@ class MEM_WB_Register extends Module {
     b.regWrite           := false.B
     b.wbSource           := WBSource.ALU
     b.illegalInstruction := false.B
+    b.telemetryValid     := false.B
+    b.telemetryClaActive := false.B
+    b.telemetryMulActive := false.B
+    b.telemetryResult    := 0.U(32.W)
     b
   })
 
@@ -284,6 +308,10 @@ class MEM_WB_Register extends Module {
     reg.regWrite           := false.B
     reg.wbSource           := WBSource.ALU
     reg.illegalInstruction := false.B
+    reg.telemetryValid     := false.B
+    reg.telemetryClaActive := false.B
+    reg.telemetryMulActive := false.B
+    reg.telemetryResult    := 0.U(32.W)
   }.elsewhen(!io.stall) {
     reg := io.in
   }

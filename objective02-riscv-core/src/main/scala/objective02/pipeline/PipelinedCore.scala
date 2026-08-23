@@ -6,6 +6,7 @@ import objective02.decode._
 import objective02.datapath.{BranchJumpUnit, ProgramCounter, RegisterFile}
 import objective02.memory.{DataMemory, InstructionMemory}
 import objective02.execute.{RV32MMultiplier, IterativeDivider}
+import objective02.system.{SystemMMIO, SecurityViolationEvent, AccessType, SecurityReason}
 import objective01.datapath.ALU
 
 // =========================================================================
@@ -66,6 +67,10 @@ class PipelinedCoreIO extends Bundle {
   val dividerBusy      = Output(Bool())
   val dividerDone      = Output(Bool())
   val dividerIteration = Output(UInt(6.W))
+
+  // System & Cross-Layer Interface Observability
+  val schedHint            = Output(UInt(32.W))
+  val processBehaviorClass = Output(UInt(32.W))
 }
 
 class PipelinedCore(
@@ -86,6 +91,7 @@ class PipelinedCore(
   val alu            = Module(new ALU(32)) // Reusing Objective 1 verified arithmetic datapath
   val bju            = Module(new BranchJumpUnit)
   val dmem           = Module(new DataMemory(dmemSizeBytes))
+  val systemMMIO     = Module(new SystemMMIO)
   val forwardingUnit = Module(new ForwardingUnit)
   val hazardUnit     = Module(new HazardUnit)
   val rv32mMult      = Module(new RV32MMultiplier)
@@ -268,6 +274,28 @@ class PipelinedCore(
   branchTaken    := exValid && bju.io.taken
   redirectTarget := bju.io.targetAddress
 
+  // Telemetry metadata derivation in EX stage
+  val exTelemetryValid     = WireDefault(false.B)
+  val exTelemetryClaActive = WireDefault(false.B)
+  val exTelemetryMulActive = WireDefault(false.B)
+  val exTelemetryResult    = exResult
+
+  when(exValid && !divHold) {
+    when(exControls.isMul) {
+      exTelemetryValid     := true.B
+      exTelemetryMulActive := true.B
+      exTelemetryClaActive := false.B
+    }.elsewhen(isDivOp) {
+      exTelemetryValid     := false.B
+      exTelemetryMulActive := false.B
+      exTelemetryClaActive := false.B
+    }.otherwise {
+      exTelemetryValid     := (exControls.wbSource === WBSource.ALU) || exControls.memRead || exControls.memWrite || (exControls.branchType =/= BranchType.NONE)
+      exTelemetryClaActive := (exControls.aluOp === ALUOps.ADD || exControls.aluOp === ALUOps.SUB)
+      exTelemetryMulActive := false.B
+    }
+  }
+
   exMemReg.io.stall := false.B
   exMemReg.io.flush := false.B
   exMemReg.io.in.valid              := exValid && !divHold
@@ -284,6 +312,10 @@ class PipelinedCore(
   exMemReg.io.in.memWidth           := exControls.memWidth
   exMemReg.io.in.wbSource           := exControls.wbSource
   exMemReg.io.in.illegalInstruction := exControls.illegalInstruction
+  exMemReg.io.in.telemetryValid     := exTelemetryValid
+  exMemReg.io.in.telemetryClaActive := exTelemetryClaActive
+  exMemReg.io.in.telemetryMulActive := exTelemetryMulActive
+  exMemReg.io.in.telemetryResult    := exTelemetryResult
 
   // =========================================================================
   // 6. STAGE 4: MEMORY ACCESS (MEM)
@@ -293,11 +325,21 @@ class PipelinedCore(
   val memPcPlus4     = exMemReg.io.out.pcPlus4
   val memInstruction = exMemReg.io.out.instruction
 
+  // SystemMMIO Interception
+  systemMMIO.io.address     := exMemReg.io.out.aluResult
+  systemMMIO.io.memReadReq  := memValid && exMemReg.io.out.memRead
+  systemMMIO.io.memWriteReq := memValid && exMemReg.io.out.memWrite
+  systemMMIO.io.writeData   := exMemReg.io.out.rs2Data
+  systemMMIO.io.memWidth    := exMemReg.io.out.memWidth
+
+  // DataMemory Access (suppressed when MMIO window hits)
   dmem.io.address   := exMemReg.io.out.aluResult
   dmem.io.writeData := exMemReg.io.out.rs2Data
-  dmem.io.memRead   := memValid && exMemReg.io.out.memRead
-  dmem.io.memWrite  := memValid && exMemReg.io.out.memWrite
+  dmem.io.memRead   := memValid && exMemReg.io.out.memRead && !systemMMIO.io.windowHit
+  dmem.io.memWrite  := memValid && exMemReg.io.out.memWrite && !systemMMIO.io.windowHit
   dmem.io.memWidth  := exMemReg.io.out.memWidth
+
+  val memReadData = Mux(systemMMIO.io.windowHit, systemMMIO.io.readData, dmem.io.readData)
 
   memWbReg.io.stall := false.B
   memWbReg.io.flush := false.B
@@ -307,17 +349,21 @@ class PipelinedCore(
   memWbReg.io.in.instruction        := memInstruction
   memWbReg.io.in.rd                 := exMemReg.io.out.rd
   memWbReg.io.in.aluResult          := exMemReg.io.out.aluResult
-  memWbReg.io.in.memReadData        := dmem.io.readData
+  memWbReg.io.in.memReadData        := memReadData
   memWbReg.io.in.imm                := exMemReg.io.out.imm
-  memWbReg.io.in.memRead            := memValid && exMemReg.io.out.memRead && !dmem.io.misaligned
+  memWbReg.io.in.memRead            := memValid && exMemReg.io.out.memRead && Mux(systemMMIO.io.windowHit, systemMMIO.io.readAccepted, !dmem.io.misaligned)
   memWbReg.io.in.memReadReq         := memValid && exMemReg.io.out.memRead
-  memWbReg.io.in.memWrite           := memValid && exMemReg.io.out.memWrite && !dmem.io.misaligned
+  memWbReg.io.in.memWrite           := memValid && exMemReg.io.out.memWrite && Mux(systemMMIO.io.windowHit, systemMMIO.io.writeAccepted, !dmem.io.misaligned)
   memWbReg.io.in.memWriteReq        := memValid && exMemReg.io.out.memWrite
   memWbReg.io.in.memAddress         := exMemReg.io.out.aluResult
   memWbReg.io.in.memWriteData       := exMemReg.io.out.rs2Data
-  memWbReg.io.in.regWrite           := exMemReg.io.out.regWrite && !dmem.io.misaligned
+  memWbReg.io.in.regWrite           := exMemReg.io.out.regWrite && Mux(exMemReg.io.out.memRead, Mux(systemMMIO.io.windowHit, systemMMIO.io.readAccepted, !dmem.io.misaligned), true.B)
   memWbReg.io.in.wbSource           := exMemReg.io.out.wbSource
   memWbReg.io.in.illegalInstruction := exMemReg.io.out.illegalInstruction
+  memWbReg.io.in.telemetryValid     := exMemReg.io.out.telemetryValid
+  memWbReg.io.in.telemetryClaActive := exMemReg.io.out.telemetryClaActive
+  memWbReg.io.in.telemetryMulActive := exMemReg.io.out.telemetryMulActive
+  memWbReg.io.in.telemetryResult    := exMemReg.io.out.telemetryResult
 
   // =========================================================================
   // 7. STAGE 5: WRITEBACK & RETIREMENT (WB)
@@ -339,6 +385,30 @@ class PipelinedCore(
   rf.io.rdAddress   := wbRd
   rf.io.writeData   := wbData
   rf.io.writeEnable := wbRegWrite
+
+  // Telemetry Retirement Update
+  systemMMIO.io.telemetryValid      := wbValid && memWbReg.io.out.telemetryValid
+  systemMMIO.io.telemetryClaActive  := memWbReg.io.out.telemetryClaActive
+  systemMMIO.io.telemetryMulActive  := memWbReg.io.out.telemetryMulActive
+  systemMMIO.io.telemetryResult     := memWbReg.io.out.telemetryResult
+
+  // System Performance Counters
+  systemMMIO.io.retireEvent         := wbValid
+  systemMMIO.io.commitPc            := wbPc
+  systemMMIO.io.branchTaken         := exValid && bju.io.taken && (exControls.branchType =/= BranchType.NONE) && (idExReg.io.out.controls.jumpType === JumpType.NONE)
+  systemMMIO.io.loadUseStall        := hazardUnit.io.stallIF
+  systemMMIO.io.dividerBusy         := divRem.io.busy
+  systemMMIO.io.pipelineStall       := stallIF
+
+  // Security Violation Event Interface (inactive for Phase 6)
+  val secEvent = Wire(new SecurityViolationEvent)
+  secEvent.valid      := false.B
+  secEvent.pc         := 0.U(32.W)
+  secEvent.address    := 0.U(32.W)
+  secEvent.accessType := AccessType.READ
+  secEvent.reason     := SecurityReason.NONE
+  secEvent.context    := systemMMIO.io.schedHint
+  systemMMIO.io.securityEvent := secEvent
 
   // =========================================================================
   // 8. Architectural Commit / Retirement Interface
@@ -396,4 +466,7 @@ class PipelinedCore(
   io.dividerBusy      := divRem.io.busy
   io.dividerDone      := divRem.io.done
   io.dividerIteration := divRem.io.iteration
+
+  io.schedHint            := systemMMIO.io.schedHint
+  io.processBehaviorClass := systemMMIO.io.processBehaviorClass
 }
