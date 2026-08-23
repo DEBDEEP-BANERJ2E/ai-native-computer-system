@@ -16,7 +16,7 @@ interface Props {
   onA: (val: string) => void;
   onB: (val: string) => void;
   onOpcode: (val: number) => void;
-  onExecute: (overrideA?: number, overrideB?: number, overrideOpcode?: number) => void;
+  onExecute: (overrideA?: number, overrideB?: number, overrideOpcode?: number) => Promise<void>;
   onReset: () => void;
   onInspectUnit: (unit: InspectableUnit) => void;
 }
@@ -41,7 +41,7 @@ export function SystemTopLab({
     <div className="lab-container system-top-lab">
       <div className="lab-header-banner">
         <div>
-          <span className="lab-tag">LAB 01 · SYSTEM TOP</span>
+          <span className="lab-tag">LAB 01 · LIVE VERILATOR RTL EXECUTION</span>
           <h2>Integrated Subsystem Datapath &amp; MMIO Bus</h2>
         </div>
         <p className="lab-desc">

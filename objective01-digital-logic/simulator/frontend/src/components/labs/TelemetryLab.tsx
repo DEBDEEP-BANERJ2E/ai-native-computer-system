@@ -60,7 +60,7 @@ export function TelemetryLab({ telemetry }: Props) {
     <div className="lab-container telemetry-lab">
       <div className="lab-header-banner">
         <div>
-          <span className="lab-tag">LAB 06 · HARDWARE TELEMETRY &amp; EDP</span>
+          <span className="lab-tag">LAB 06 · LIVE VERILATOR MMIO BUS RESPONSE</span>
           <h2>Memory-Mapped Telemetry Registers &amp; Result-Bus Activity Proxies</h2>
         </div>
         <p className="lab-desc">

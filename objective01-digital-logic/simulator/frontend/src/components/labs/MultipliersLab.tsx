@@ -52,11 +52,11 @@ export function MultipliersLab() {
     <div className="lab-container multipliers-lab">
       <div className="lab-header-banner">
         <div>
-          <span className="lab-tag">LAB 04 · MULTIPLIER ARCHITECTURES</span>
+          <span className="lab-tag">LAB 04 · ARCHITECTURE MODEL (VALIDATED AGAINST RTL)</span>
           <h2>Radix-4 Booth Recoding &amp; Wallace Tree 3:2 Reduction</h2>
         </div>
         <p className="lab-desc">
-          Unpacks the 3-phase hardware multiplier pipeline: Radix-4 Booth recoding (halving partial products), multi-layer Wallace 3:2 Carry-Save Compressor reduction, and final carry-propagate addition.
+          Interactive architecture model demonstrating the 3-phase Booth-Wallace pipeline: Radix-4 Booth recoding (halving partial products), multi-layer Wallace 3:2 Carry-Save Compressor reduction, and final carry-propagate addition. Validated against <code>BoothWallaceMultiplier.scala</code>.
         </p>
       </div>
 
@@ -82,7 +82,7 @@ export function MultipliersLab() {
             <small className="signed-sub">Signed Dec: {bSigned.toLocaleString()}</small>
           </div>
           <div className="adder-result-box highlight-mul">
-            <span className="res-tag">Hardware 32-bit Product</span>
+            <span className="res-tag">Architecture-Model Product</span>
             <strong className="res-hex">0x{product32Hex}</strong>
             <span className="res-cout">Signed Dec: {product32.toLocaleString()}</span>
           </div>
@@ -96,13 +96,13 @@ export function MultipliersLab() {
           <div className="panel-heading">
             <div>
               <span className="kicker">PHASE 1</span>
-              <h3>Radix-4 Booth Recoding</h3>
+              <h3>Radix-4 Booth Recoding Excerpt</h3>
             </div>
-            <span className="phase-badge">Halves Partial Products</span>
+            <span className="phase-badge">First 8 Bits (4 of 16 groups)</span>
           </div>
 
           <p className="phase-desc">
-            Takes 3-bit overlapping slices (B[2i+1], B[2i], B[2i-1]) of multiplier B. Generates partial products in &#123;0, &plusmn;1A, &plusmn;2A&#125;.
+            Booth recoding excerpt — first 8 multiplier bits (4 of 16 groups): Takes 3-bit overlapping slices (B[2i+1], B[2i], B[2i-1]) of multiplier B. Generates partial products in &#123;0, &plusmn;1A, &plusmn;2A&#125;.
           </p>
 
           <div className="booth-groups-list">

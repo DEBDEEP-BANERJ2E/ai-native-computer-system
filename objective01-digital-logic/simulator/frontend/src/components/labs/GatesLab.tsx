@@ -29,11 +29,11 @@ export function GatesLab() {
     <div className="lab-container gates-lab">
       <div className="lab-header-banner">
         <div>
-          <span className="lab-tag">LAB 02 · GATES &amp; REVERSIBLE LOGIC</span>
-          <h2>Quantum-Inspired Reversible Computing (Landauer Limit)</h2>
+          <span className="lab-tag">LAB 02 · ARCHITECTURE MODEL (VALIDATED AGAINST RTL)</span>
+          <h2>Logically Reversible Gates (Landauer Principles)</h2>
         </div>
         <p className="lab-desc">
-          Explore zero-entropy reversible logic gates. Reversible gates map n-bit inputs bijectively to n-bit outputs (f: &#123;0,1&#125;^n &rarr; &#123;0,1&#125;^n), ensuring zero information loss and satisfying Landauer&apos;s thermodynamic bound (k_B T ln 2).
+          Logically reversible gates motivated by Landauer&apos;s principle; this FPGA/RTL implementation does not claim zero physical dissipation. Explores bijective logic mappings (f: &#123;0,1&#125;^n &rarr; &#123;0,1&#125;^n) where every input pattern maps to a unique output pattern with zero information erasure.
         </p>
       </div>
 

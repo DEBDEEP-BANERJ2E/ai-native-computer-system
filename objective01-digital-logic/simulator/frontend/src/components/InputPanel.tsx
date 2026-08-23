@@ -24,7 +24,7 @@ type Props = {
   onA: (value: string) => void;
   onB: (value: string) => void;
   onOpcode: (value: number) => void;
-  onExecute: (overrideA?: number, overrideB?: number, overrideOpcode?: number) => void;
+  onExecute: (overrideA?: number, overrideB?: number, overrideOpcode?: number) => Promise<void>;
   onReset: () => void;
 };
 
@@ -115,7 +115,7 @@ export function InputPanel({
       onOpcode(preset.opcode);
       const parsedA = Number.parseInt(preset.a, 16) >>> 0;
       const parsedB = Number.parseInt(preset.b, 16) >>> 0;
-      onExecute(parsedA, parsedB, preset.opcode);
+      await onExecute(parsedA, parsedB, preset.opcode);
       await new Promise((r) => setTimeout(r, 650));
     }
     setIsAutoRunning(false);

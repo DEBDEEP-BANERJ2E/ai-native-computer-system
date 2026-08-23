@@ -8,12 +8,12 @@ export type LabConfig = {
 };
 
 export const LABS: LabConfig[] = [
-  { id: "system", index: "01", name: "System Top", subtitle: "Subsystem Datapath & MMIO Bus" },
-  { id: "gates", index: "02", name: "Gates & Reversible", subtitle: "Fredkin (CSWAP) & Toffoli (CCNOT)" },
-  { id: "adders", index: "03", name: "Adders Lab", subtitle: "RCA Baseline vs Flat CLA vs Hierarchical CLA" },
-  { id: "multipliers", index: "04", name: "Multipliers Lab", subtitle: "Radix-4 Booth & Wallace 3:2 Tree" },
-  { id: "alu", index: "05", name: "ALU & Shifter", subtitle: "11-Opcode Matrix & Variable Shifter" },
-  { id: "telemetry", index: "06", name: "Telemetry & EDP", subtitle: "MMIO Register Bus & Activity Proxies" },
+  { id: "system", index: "01", name: "System Top", subtitle: "Live Verilator RTL execution" },
+  { id: "gates", index: "02", name: "Gates & Reversible", subtitle: "Interactive architecture model — validated against RTL" },
+  { id: "adders", index: "03", name: "Adders Lab", subtitle: "Interactive architecture model — validated against RTL" },
+  { id: "multipliers", index: "04", name: "Multipliers Lab", subtitle: "Interactive architecture model — validated against RTL" },
+  { id: "alu", index: "05", name: "ALU & Shifter", subtitle: "Interactive architecture model — validated against RTL" },
+  { id: "telemetry", index: "06", name: "Telemetry & EDP", subtitle: "Live Verilator MMIO bus response" },
 ];
 
 export type OpCategory = "arithmetic" | "logic" | "shift" | "compare" | "mul";

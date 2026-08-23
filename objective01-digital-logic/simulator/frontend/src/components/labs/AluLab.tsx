@@ -64,11 +64,11 @@ export function AluLab() {
     <div className="lab-container alu-lab">
       <div className="lab-header-banner">
         <div>
-          <span className="lab-tag">LAB 05 · ALU &amp; SHIFTER DATAPATH</span>
+          <span className="lab-tag">LAB 05 · ARCHITECTURE MODEL (VALIDATED AGAINST RTL)</span>
           <h2>32-Bit RISC-V Arithmetic Logic Unit &amp; Variable Shifter</h2>
         </div>
         <p className="lab-desc">
-          Evaluates all 11 RISC-V compatible ALU opcodes across arithmetic, bitwise logic, logarithmic barrel shifting (SLL, SRL, SRA), and magnitude comparison (SLT, SLTU).
+          Interactive architecture model evaluating all 11 RISC-V compatible ALU opcodes across arithmetic, bitwise logic, logarithmic barrel shifting (SLL, SRL, SRA), and magnitude comparison (SLT, SLTU). Validated against <code>ALU.scala</code>.
         </p>
       </div>
 
@@ -94,7 +94,7 @@ export function AluLab() {
             <small className="signed-sub">Signed Dec: {bSigned.toLocaleString()} · Shift B[4:0] = {shiftAmt}</small>
           </div>
           <div className="adder-result-box highlight-alu">
-            <span className="res-tag">ALU Result [31:0]</span>
+            <span className="res-tag">Architecture ALU Result [31:0]</span>
             <strong className="res-hex">0x{resultVal.toString(16).padStart(8, "0").toUpperCase()}</strong>
             <div className="mini-flags-row">
               <span className={`flag-pill ${zeroFlag ? "on" : ""}`}>Z={zeroFlag ? 1 : 0}</span>

@@ -56,11 +56,11 @@ export function AddersLab() {
     <div className="lab-container adders-lab">
       <div className="lab-header-banner">
         <div>
-          <span className="lab-tag">LAB 03 · ADDER ARCHITECTURES</span>
+          <span className="lab-tag">LAB 03 · ARCHITECTURE MODEL (VALIDATED AGAINST RTL)</span>
           <h2>Ripple Carry Adder vs Hierarchical Carry-Lookahead Adder</h2>
         </div>
         <p className="lab-desc">
-          Compare the $O(n)$ linear carry chain of a Ripple Carry Adder against the $O(\log n)$ parallel lookahead carry generator in the 32-bit Hierarchical Carry-Lookahead Adder (HCLA).
+          Illustrates the algorithmic logic-depth scaling of the linear carry chain in a Ripple Carry Adder (O(n)) versus the parallel lookahead tree in the 32-bit Hierarchical Carry-Lookahead Adder (O(log n)). Theoretical logic-depth estimates shown; physical silicon timing pending post-place-and-route timing analysis.
         </p>
       </div>
 
@@ -93,7 +93,7 @@ export function AddersLab() {
             </button>
           </div>
           <div className="adder-result-box">
-            <span className="res-tag">Result Sum [31:0]</span>
+            <span className="res-tag">Architecture Sum [31:0]</span>
             <strong className="res-hex">0x{sum32.toString(16).padStart(8, "0").toUpperCase()}</strong>
             <span className="res-cout">Cout = {cout ? "1" : "0"}</span>
           </div>
@@ -109,11 +109,11 @@ export function AddersLab() {
               <span className="kicker">BASELINE ARCHITECTURE</span>
               <h3>Ripple Carry Adder (RCA)</h3>
             </div>
-            <span className="complexity-badge bad">Delay: O(n) · 32 Gate Levels</span>
+            <span className="complexity-badge bad">Logic Depth: O(n) · ~64 Gate Levels (estimate)</span>
           </div>
 
           <p className="arch-desc">
-            Carries ripple sequentially through 32 cascaded 1-bit Full Adders ($FA_0 \to FA_1 \to \dots \to FA_{31}$). Critical path delay is proportional to operand width $n$.
+            Carries ripple sequentially through 32 cascaded 1-bit Full Adders (FA0 &rarr; FA1 &rarr; ... &rarr; FA31). Critical path delay is linearly proportional to operand width n.
           </p>
 
           <div className="ripple-chain-visual">
@@ -137,8 +137,8 @@ export function AddersLab() {
 
           <div className="metric-table">
             <div className="metric-row">
-              <span>Critical Path Gate Delay:</span>
-              <strong>2n = 64 gate delays (32 FAs)</strong>
+              <span>Illustrative logic-depth estimate:</span>
+              <strong>~64 gate levels (2 delays × 32 FAs)</strong>
             </div>
             <div className="metric-row">
               <span>Chisel Implementation:</span>
@@ -154,11 +154,11 @@ export function AddersLab() {
               <span className="kicker">OPTIMIZED ARCHITECTURE</span>
               <h3>Hierarchical Carry-Lookahead Adder (HCLA)</h3>
             </div>
-            <span className="complexity-badge good">Delay: O(log n) · 8 Gate Levels</span>
+            <span className="complexity-badge good">Logic Depth: O(log n) · ~8 Gate Levels (estimate)</span>
           </div>
 
           <p className="arch-desc">
-            Divides 32 bits into <strong>8 × 4-bit CLA blocks (CLA4)</strong>. Generates block Group Propagate ($P_G$) and Group Generate ($G_G$) fed into a 2nd-level Lookahead Generator.
+            Divides 32 bits into <strong>8 × 4-bit CLA blocks (CLA4)</strong>. Generates block Group Propagate (P_G) and Group Generate (G_G) fed into a 2nd-level Lookahead Generator.
           </p>
 
           {/* 8 CLA4 Blocks Visual */}
@@ -182,8 +182,8 @@ export function AddersLab() {
 
           <div className="metric-table">
             <div className="metric-row">
-              <span>Critical Path Gate Delay:</span>
-              <strong>~8 gate delays ($O(\log n)$)</strong>
+              <span>Illustrative logic-depth estimate:</span>
+              <strong>~8 gate levels (O(log n) tree)</strong>
             </div>
             <div className="metric-row">
               <span>Chisel Implementation:</span>
