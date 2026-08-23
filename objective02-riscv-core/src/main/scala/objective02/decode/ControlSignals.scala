@@ -58,7 +58,18 @@ object ALUOps {
   val SLT  = 8.U(4.W) // Set Less Than (signed)
   val SLTU = 9.U(4.W) // Set Less Than Unsigned
   val MUL  = 10.U(4.W)// Radix-4 Booth & Wallace 3:2 Multiplication
-  val PASS_B = 11.U(4.W) // Pass Operand B through
+}
+
+object MOp {
+  val NONE   = 0.U(4.W) // Not an M-extension operation
+  val MUL    = 1.U(4.W) // Signed 32x32 -> lower 32-bit (Objective 1 Booth-Wallace)
+  val MULH   = 2.U(4.W) // Signed 32x32 -> upper 32-bit (pending Phase 5)
+  val MULHSU = 3.U(4.W) // Signed x Unsigned -> upper 32-bit (pending Phase 5)
+  val MULHU  = 4.U(4.W) // Unsigned x Unsigned -> upper 32-bit (pending Phase 5)
+  val DIV    = 5.U(4.W) // Signed division (pending Phase 5)
+  val DIVU   = 6.U(4.W) // Unsigned division (pending Phase 5)
+  val REM    = 7.U(4.W) // Signed remainder (pending Phase 5)
+  val REMU   = 8.U(4.W) // Unsigned remainder (pending Phase 5)
 }
 
 class ControlSignalsBundle extends Bundle {
@@ -73,6 +84,7 @@ class ControlSignalsBundle extends Bundle {
   val jumpType           = UInt(2.W)
   val wbSource           = UInt(2.W)
   val isMul              = Bool()
+  val mOp                = UInt(4.W)
   val isSecurityOp       = Bool()
   val illegalInstruction = Bool()
 }

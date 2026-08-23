@@ -75,4 +75,22 @@ class ProgramCounterSpec extends AnyFlatSpec with ChiselScalatestTester with Mat
       dut.io.pc.expect("h00000044".U)
     }
   }
+
+  it should "prioritize jump/branch redirect over stall when both are asserted simultaneously" in {
+    test(new ProgramCounter(bootAddress = 0x00000100L)) { dut =>
+      dut.io.stall.poke(false.B)
+      dut.io.jumpBranchTaken.poke(false.B)
+      dut.io.pc.expect("h00000100".U)
+
+      // Assert BOTH stall and jumpBranchTaken simultaneously
+      dut.io.stall.poke(true.B)
+      dut.io.jumpBranchTaken.poke(true.B)
+      dut.io.jumpBranchTarget.poke("h00000800".U)
+      dut.clock.step(1)
+
+      // Redirect MUST win (PC becomes 0x800, not 0x100)
+      dut.io.pc.expect("h00000800".U)
+      dut.io.pcPlus4.expect("h00000804".U)
+    }
+  }
 }

@@ -17,10 +17,10 @@ class ProgramCounter(bootAddress: BigInt = 0x00000000L) extends Module {
 
   val nextPc = Wire(UInt(32.W))
 
-  when(io.stall) {
-    nextPc := pcReg
-  }.elsewhen(io.jumpBranchTaken) {
+  when(io.jumpBranchTaken) {
     nextPc := io.jumpBranchTarget
+  }.elsewhen(io.stall) {
+    nextPc := pcReg
   }.otherwise {
     nextPc := pcReg + 4.U(32.W)
   }

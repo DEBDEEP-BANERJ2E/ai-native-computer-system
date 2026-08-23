@@ -44,6 +44,7 @@ class Decoder extends Module {
   ctrl.jumpType           := JumpType.NONE
   ctrl.wbSource           := WBSource.ALU
   ctrl.isMul              := false.B
+  ctrl.mOp                := MOp.NONE
   ctrl.isSecurityOp       := false.B
   ctrl.illegalInstruction := false.B
 
@@ -72,20 +73,19 @@ class Decoder extends Module {
         switch(f3) {
           is(FUNCT3_ADD_SUB) { ctrl.aluOp := ALUOps.SUB }
           is(FUNCT3_SRL_SRA) { ctrl.aluOp := ALUOps.SRA }
-          // Any other funct3 with funct7=0x20 is illegal
         }
         when(f3 =/= FUNCT3_ADD_SUB && f3 =/= FUNCT3_SRL_SRA) {
           ctrl.illegalInstruction := true.B
         }
       }.elsewhen(f7 === FUNCT7_MULDIV) {
-        // RV32M Extension
+        // RV32M Extension: only lower-word MUL is backed by Objective 1 hardware
         when(f3 === FUNCT3_MUL) {
           ctrl.aluOp := ALUOps.MUL
           ctrl.isMul := true.B
+          ctrl.mOp   := MOp.MUL
         }.otherwise {
-          // Other M-extension ops handled by future divider
-          ctrl.aluOp := ALUOps.MUL
-          ctrl.isMul := true.B
+          // MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU are marked illegal until Phase 5 execution units
+          ctrl.illegalInstruction := true.B
         }
       }.otherwise {
         ctrl.illegalInstruction := true.B
@@ -217,7 +217,7 @@ class Decoder extends Module {
     is(OP_LUI) {
       ctrl.aluSrcA   := ALUSrcA.ZERO
       ctrl.aluSrcB   := ALUSrcB.IMM
-      ctrl.aluOp     := ALUOps.PASS_B
+      ctrl.aluOp     := ALUOps.ADD
       ctrl.regWrite  := true.B
       ctrl.wbSource  := WBSource.IMM
     }
@@ -231,20 +231,42 @@ class Decoder extends Module {
     }
 
     // -------------------------------------------------------------
-    // Security / Capability Extension Instructions
+    // Security / Capability Extension Instructions (Placeholder Reservation)
     // -------------------------------------------------------------
     is(OP_SECURITY) {
       ctrl.isSecurityOp := true.B
-      ctrl.regWrite     := true.B
-      ctrl.wbSource     := WBSource.ALU
+      ctrl.regWrite     := false.B // No side-effects until Phase 7 capability semantics
+      ctrl.memRead      := false.B
+      ctrl.memWrite     := false.B
+    }
+
+    // -------------------------------------------------------------
+    // System Instructions (CSR / ECALL / EBREAK: Marked illegal until traps/CSRs implemented)
+    // -------------------------------------------------------------
+    is(OP_SYSTEM) {
+      ctrl.illegalInstruction := true.B
     }
   }
 
-  // Handle default / unmapped opcode
+  // Handle unmapped opcodes
   when(op =/= OP_R_TYPE && op =/= OP_I_TYPE && op =/= OP_LOAD && op =/= OP_STORE &&
        op =/= OP_BRANCH && op =/= OP_JAL && op =/= OP_JALR && op =/= OP_LUI &&
-       op =/= OP_AUIPC && op =/= OP_SECURITY && op =/= OP_SYSTEM) {
+       op =/= OP_AUIPC && op =/= OP_SECURITY) {
     ctrl.illegalInstruction := true.B
+  }
+
+  // -------------------------------------------------------------
+  // Final Safety Squash: Illegal instruction => zero architectural side effects
+  // -------------------------------------------------------------
+  when(ctrl.illegalInstruction) {
+    ctrl.regWrite     := false.B
+    ctrl.memRead      := false.B
+    ctrl.memWrite     := false.B
+    ctrl.branchType   := BranchType.NONE
+    ctrl.jumpType     := JumpType.NONE
+    ctrl.isMul        := false.B
+    ctrl.mOp          := MOp.NONE
+    ctrl.isSecurityOp := false.B
   }
 
   io.controls := ctrl
