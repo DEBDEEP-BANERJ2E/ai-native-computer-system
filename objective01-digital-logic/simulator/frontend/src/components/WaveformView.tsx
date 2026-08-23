@@ -372,7 +372,7 @@ export function WaveformView({ history }: { history: HistoryEntry[] }) {
               fontFamily="DM Mono"
               fill="#627876"
             >
-              Execute ALU operations above to capture cycle-accurate SystemVerilog timing waveforms.
+              Execute ALU operations above to record RTL transaction timing traces (sampled once per executed hardware cycle).
             </text>
           </g>
         ) : null}
@@ -380,7 +380,7 @@ export function WaveformView({ history }: { history: HistoryEntry[] }) {
 
       <div className="waveform-foot">
         <span>
-          <b>Digital Waveform Engine:</b> Cycle traces generated directly from persistent Verilator execution of <code>Objective1Subsystem.sv</code>
+          <b>RTL Transaction Timing View:</b> Sampled once per executed hardware transaction from persistent Verilator simulation.
         </span>
         <span className="trace-count-mono">
           Displaying last {cycles.length.toString().padStart(2, "0")} cycles (hover to inspect)

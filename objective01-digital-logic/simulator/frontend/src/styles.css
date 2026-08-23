@@ -1668,23 +1668,960 @@ button, input, select {
 .text-emerald { color: var(--emerald); }
 .text-amber { color: var(--amber); }
 
-/* Footer */
-footer {
+/* ==========================================================================
+   6 DEDICATED ARCHITECTURE LABS DESIGN SYSTEM
+   ========================================================================== */
+
+/* Labs Top Navigation Bar */
+.labs-nav-bar {
+  margin: 14px 0 20px;
+  background: #111d1c;
+  border: 1px solid #283e3b;
+  border-bottom: 2px solid #1a2f2b;
+}
+
+.labs-nav-scroll {
+  display: flex;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.lab-nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border: none;
+  border-right: 1px solid #1f3330;
+  background: transparent;
+  color: #7e9c94;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  text-align: left;
+}
+
+.lab-nav-btn:hover {
+  background: #162a26;
+  color: #dcebe5;
+}
+
+.lab-nav-btn.active {
+  background: #173029;
+  color: #ffffff;
+  border-bottom: 3px solid var(--emerald);
+  box-shadow: inset 0 -3px 0 var(--emerald);
+}
+
+.lab-btn-index {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--amber);
+  padding: 2px 5px;
+  background: #101f1c;
+  border: 1px solid #233b35;
+}
+
+.lab-nav-btn.active .lab-btn-index {
+  background: #1b3d33;
+  color: #a4ebd0;
+  border-color: var(--emerald);
+}
+
+.lab-btn-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.lab-btn-name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.lab-btn-sub {
+  font-size: 9.5px;
+  color: #63827b;
+  font-family: 'DM Mono', monospace;
+}
+
+.lab-nav-btn.active .lab-btn-sub {
+  color: #8ecdb5;
+}
+
+/* Lab General Container & Header Banner */
+.lab-container {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  animation: fadeIn 0.25s ease-out;
+}
+
+.lab-header-banner {
+  padding: 16px 20px;
+  background: #111d1c;
+  border: 1px solid #273e3a;
+  border-left: 4px solid var(--emerald);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lab-tag {
+  color: var(--amber);
+  font-family: 'DM Mono', monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.lab-header-banner h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #e6f3ee;
+}
+
+.lab-desc {
+  margin: 0;
+  color: #8baaa1;
+  font-size: 12.5px;
+  line-height: 1.5;
+  max-width: 900px;
+}
+
+.lab-desc code {
+  color: var(--amber);
+  font-family: 'DM Mono', monospace;
+}
+
+/* Gates Lab Styles */
+.gates-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.gate-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.gate-badge {
+  padding: 3px 8px;
+  background: #142823;
+  border: 1px solid #2e4d44;
+  color: var(--emerald);
+  font-family: 'DM Mono', monospace;
+  font-size: 9.5px;
+}
+
+.gate-summary {
+  margin: 0;
+  color: #8dafa5;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.interactive-gate-box {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1.2fr;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  background: #0d1716;
+  border: 1px solid #213531;
+}
+
+.gate-inputs, .gate-outputs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gate-section-title {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  color: #63847c;
+  text-transform: uppercase;
+}
+
+.bit-toggle {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 16px;
-  padding-top: 20px;
-  margin-top: 16px;
-  color: #5d716f;
-  border-top: 1px solid #1e2c2b;
+  padding: 8px 10px;
+  border: 1px solid #29403b;
+  background: #132420;
+  color: #8fb1a7;
+  cursor: pointer;
+  transition: all 0.15s;
 }
 
-footer span {
-  display: inline-flex;
+.bit-toggle:hover {
+  border-color: var(--emerald);
+  color: #ffffff;
+}
+
+.bit-toggle.on {
+  border-color: #5fb091;
+  background: #19382f;
+  color: #a2ebd0;
+  box-shadow: 0 0 10px rgba(112, 203, 165, 0.2);
+}
+
+.bit-toggle span {
+  font-size: 11px;
+  font-family: 'DM Mono', monospace;
+}
+
+.bit-toggle strong {
+  font-size: 15px;
+  font-family: 'DM Mono', monospace;
+}
+
+.bit-output {
+  display: flex;
+  justify-content: space-between;
   align-items: center;
+  padding: 8px 10px;
+  border: 1px solid #263834;
+  background: #0f1c1a;
+  color: #6c8882;
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+}
+
+.bit-output.on {
+  border-color: #5fb091;
+  background: #142e26;
+  color: #a4ebd0;
+}
+
+.bit-output strong {
+  font-size: 15px;
+}
+
+.gate-diagram-visual {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.gate-symbol {
+  padding: 12px 10px;
+  background: #132522;
+  border: 1px solid #325049;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sym-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  font-weight: bold;
+  color: var(--amber);
+}
+
+.sym-math {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  color: #7fa69c;
+  line-height: 1.3;
+}
+
+.truth-table-wrap {
+  margin-top: 6px;
+}
+
+.table-title {
+  display: block;
+  margin-bottom: 6px;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: #799a91;
+}
+
+.mini-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  background: #0c1414;
+  border: 1px solid #223532;
+}
+
+.mini-table th, .mini-table td {
+  padding: 5px 8px;
+  text-align: center;
+  border-bottom: 1px solid #1a2927;
+}
+
+.mini-table th {
+  background: #142220;
+  color: var(--emerald);
+}
+
+.mini-table tr.active-row td {
+  background: #1a382e;
+  color: #bbf2dc;
+  font-weight: bold;
+}
+
+.active-dot {
+  color: var(--emerald);
+}
+
+/* Adder Lab Controls & Comparison Styles */
+.adder-controls-panel {
+  padding: 14px 18px;
+}
+
+.adder-inputs-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto 1.3fr;
+  align-items: center;
+  gap: 14px;
+}
+
+.adder-input-box {
+  display: flex;
+  flex-direction: column;
   gap: 6px;
 }
+
+.adder-input-box label, .adder-cin-box label {
+  color: #7e9f96;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+}
+
+.adder-input-box input {
+  padding: 8px 10px;
+  border: 1px solid #334d47;
+  background: #0e1717;
+  color: var(--amber);
+  font-family: 'DM Mono', monospace;
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  outline: none;
+}
+
+.adder-input-box input:focus {
+  border-color: var(--emerald);
+}
+
+.signed-sub {
+  color: #63827b;
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+}
+
+.adder-cin-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cin-btn {
+  padding: 8px 14px;
+  border: 1px solid #314d46;
+  background: #12211e;
+  color: #8daea5;
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.cin-btn.active {
+  border-color: var(--emerald);
+  background: #17362d;
+  color: #a4ebd0;
+}
+
+.adder-result-box {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 14px;
+  background: #132420;
+  border-left: 3px solid var(--amber);
+}
+
+.adder-result-box.highlight-mul {
+  border-left-color: #d0966a;
+}
+
+.adder-result-box.highlight-alu {
+  border-left-color: var(--emerald);
+}
+
+.res-tag {
+  color: #799a91;
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+}
+
+.res-hex {
+  color: #f0c395;
+  font-family: 'DM Mono', monospace;
+  font-size: 18px;
+}
+
+.res-cout {
+  color: #7fb5a2;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+}
+
+.architecture-comparison-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.arch-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.complexity-badge {
+  padding: 3px 8px;
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  border-radius: 2px;
+}
+
+.complexity-badge.bad {
+  background: #2b1a1a;
+  border: 1px solid #6b3535;
+  color: #f2aba2;
+}
+
+.complexity-badge.good {
+  background: #142823;
+  border: 1px solid #2e4d44;
+  color: var(--emerald);
+}
+
+.arch-desc {
+  margin: 0;
+  color: #8dafa5;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ripple-chain-visual {
+  padding: 10px;
+  background: #0c1414;
+  border: 1px solid #1f302e;
+  overflow-x: auto;
+}
+
+.ripple-chain-scroll {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 600px;
+}
+
+.chain-node {
+  padding: 4px 8px;
+  background: #111f1d;
+  border: 1px solid #2b443e;
+  color: #8faea6;
+  font-family: 'DM Mono', monospace;
+  font-size: 9.5px;
+}
+
+.chain-fa-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 6px;
+  background: #142421;
+  border: 1px solid #283e39;
+  text-align: center;
+  font-family: 'DM Mono', monospace;
+}
+
+.fa-title {
+  font-size: 9px;
+  color: #799a91;
+}
+
+.fa-carry {
+  font-size: 8.5px;
+  padding: 1px 3px;
+  background: #0e1817;
+  color: #55776f;
+}
+
+.fa-carry.high {
+  color: var(--amber);
+  font-weight: bold;
+}
+
+.hcla-blocks-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.cla4-mini-card {
+  padding: 6px 8px;
+  background: #12211e;
+  border: 1px solid #273f3a;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+}
+
+.cla4-top {
+  display: flex;
+  justify-content: space-between;
+  color: var(--amber);
+  font-weight: bold;
+}
+
+.cla4-signals {
+  display: flex;
+  justify-content: space-between;
+  color: #7ea398;
+}
+
+.cla4-sum code {
+  color: var(--emerald);
+}
+
+.metric-table {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  background: #0f1918;
+  border: 1px solid #203330;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+}
+
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  color: #7e9f96;
+}
+
+.metric-row strong {
+  color: #dcebe5;
+}
+
+.metric-row code {
+  color: var(--amber);
+}
+
+/* Multiplier Lab 3-Phase Styles */
+.multiplier-phases-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 14px;
+}
+
+.phase-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.phase-badge {
+  padding: 2px 6px;
+  background: #142823;
+  border: 1px solid #2e4d44;
+  color: var(--emerald);
+  font-family: 'DM Mono', monospace;
+  font-size: 8.5px;
+}
+
+.phase-desc {
+  margin: 0;
+  color: #8dafa5;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.booth-groups-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.booth-grp-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  background: #0f1a18;
+  border: 1px solid #223733;
+  font-family: 'DM Mono', monospace;
+  font-size: 9.5px;
+}
+
+.grp-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.grp-index {
+  color: #799a91;
+  font-size: 8.5px;
+}
+
+.grp-action {
+  color: var(--amber);
+}
+
+.grp-val {
+  color: #b0d4c8;
+}
+
+.csa-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: #0f1a18;
+  border: 1px solid #223733;
+}
+
+.csa-math-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-family: 'DM Mono', monospace;
+  font-size: 9.5px;
+  color: var(--amber);
+}
+
+.csa-layers-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  color: #7fa499;
+}
+
+.csa-stage.highlight {
+  color: var(--emerald);
+  font-weight: bold;
+}
+
+.final-sum-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: #0f1a18;
+  border: 1px solid #223733;
+}
+
+.final-sum-box code {
+  color: var(--amber);
+  font-family: 'DM Mono', monospace;
+  font-size: 10.5px;
+}
+
+/* ALU Lab Styles */
+.mini-flags-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.flag-pill {
+  padding: 1px 4px;
+  background: #111a19;
+  border: 1px solid #263937;
+  color: #5f7a75;
+  font-family: 'DM Mono', monospace;
+  font-size: 8.5px;
+}
+
+.flag-pill.on {
+  border-color: var(--emerald);
+  background: #162f27;
+  color: var(--emerald);
+}
+
+.opcode-lab-grid-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.active-op-label {
+  color: var(--emerald);
+  font-family: 'DM Mono', monospace;
+  font-size: 10.5px;
+}
+
+.alu-opcodes-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(105px, 1fr));
+  gap: 6px;
+}
+
+.alu-op-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid #233734;
+  background: #111e1c;
+  color: #8daea5;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: left;
+}
+
+.alu-op-card:hover {
+  border-color: #496f64;
+  background: #182e28;
+}
+
+.alu-op-card.active {
+  border-color: var(--emerald);
+  background: #19382e;
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(112, 203, 165, 0.2);
+}
+
+.op-card-top {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  font-family: 'DM Mono', monospace;
+  font-size: 8.5px;
+}
+
+.op-num { color: #63847b; }
+.op-sym { color: var(--amber); font-weight: bold; }
+.op-name { font-size: 13px; font-weight: 600; font-family: 'DM Mono', monospace; }
+.op-unit-tag { font-size: 8.5px; color: #61827a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+
+.shifter-stages-box, .comparator-details-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  background: #0e1717;
+  border: 1px solid #203330;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+}
+
+.shift-stage-row, .comp-eval-row {
+  display: flex;
+  justify-content: space-between;
+  color: #7e9f96;
+}
+
+.shift-stage-row strong { color: var(--amber); }
+
+/* MMIO Telemetry Lab Styles */
+.mmio-station-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mmio-badge {
+  padding: 3px 8px;
+  background: #142823;
+  border: 1px solid #2e4d44;
+  color: var(--emerald);
+  font-family: 'DM Mono', monospace;
+  font-size: 9.5px;
+}
+
+.mmio-regs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+}
+
+.mmio-reg-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid #243936;
+  background: #111e1c;
+  color: #8dafa5;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: left;
+}
+
+.mmio-reg-card:hover {
+  border-color: #4a7266;
+  background: #182e28;
+}
+
+.mmio-reg-card.selected {
+  border-color: var(--emerald);
+  background: #19382e;
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(112, 203, 165, 0.25);
+}
+
+.reg-card-top {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+}
+
+.reg-addr { color: var(--amber); }
+.reg-val-hex { color: #8ecdb7; font-weight: bold; }
+.reg-name { font-size: 11.5px; font-weight: 600; font-family: 'DM Mono', monospace; }
+.reg-val-dec { font-size: 9px; color: #698b82; font-family: 'DM Mono', monospace; }
+
+.selected-reg-inspector {
+  padding: 12px 14px;
+  background: #142421;
+  border-left: 3px solid var(--emerald);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.inspector-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #cde2dc;
+  font-size: 12px;
+}
+
+.probe-active-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--emerald);
+  box-shadow: 0 0 8px var(--emerald);
+}
+
+.inspector-hex {
+  margin-left: auto;
+  font-family: 'DM Mono', monospace;
+  font-size: 14px;
+  color: var(--amber);
+  font-weight: bold;
+}
+
+.inspector-role {
+  margin: 0;
+  color: #8daea5;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+/* Lab Schematics Section */
+.lab-schematic-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.schematic-view-toggles {
+  display: flex;
+  gap: 6px;
+}
+
+.lab-schematic-display {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.schematic-image-wrap {
+  padding: 10px;
+  background: #090f0e;
+  border: 1px solid #233834;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.lab-schematic-img {
+  max-width: 100%;
+  max-height: 380px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 10px rgba(0, 0, 0, 0.8));
+}
+
+.lab-schematic-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lab-schematic-notes h4 {
+  margin: 0;
+  font-size: 13px;
+  color: #dcebe5;
+}
+
+.code-block {
+  padding: 10px 12px;
+  background: #0b1212;
+  border: 1px solid #1f302e;
+  font-family: 'DM Mono', monospace;
+  font-size: 10.5px;
+  color: #a4ecd1;
+  line-height: 1.5;
+  overflow-x: auto;
+}
+
+.note-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #142421;
+  border: 1px solid #283e39;
+  border-left: 3px solid var(--emerald);
+  color: #8daea5;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.note-card code {
+  color: var(--amber);
+  font-family: 'DM Mono', monospace;
+}
+
+.reg-desc {
+  display: block;
+  color: #63827b;
+  font-size: 8.5px;
+  margin-top: 2px;
+}
+
 
 /* Responsive Media Queries */
 @media (max-width: 1024px) {

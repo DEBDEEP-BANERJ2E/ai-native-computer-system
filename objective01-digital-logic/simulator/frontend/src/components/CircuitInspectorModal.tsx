@@ -523,6 +523,41 @@ function renderLogic(unitKey: InspectableUnit, a: number, b: number, result: num
             <p><strong>Wallace Tree 3:2 Carry-Save Compressor:</strong></p>
             <code>Sum = A ⊕ B ⊕ C</code>
             <code>Carry = ((A · B) | (A · C) | (B · C)) &lt;&lt; 1</code>
+            <p style={{ marginTop: "8px" }}><strong>Final Carry-Propagate Addition:</strong></p>
+            <code>io.result := currentRows(0) +& currentRows(1)  (WallaceTree.scala)</code>
+          </div>
+        </div>
+      );
+
+    case "shifter":
+      return (
+        <div className="logic-math-panel">
+          <h3>Variable Shifter Implementation &amp; Synthesis Model</h3>
+          <div className="math-block">
+            <p><strong>1. Chisel RTL Implementation (ALU.scala):</strong></p>
+            <code>SLL: io.a &lt;&lt; shiftAmount (Dynamic logical left shift)</code>
+            <code>SRL: io.a &gt;&gt; shiftAmount (Dynamic logical right shift with zero fill)</code>
+            <code>SRA: io.a.asSInt &gt;&gt; shiftAmount (Arithmetic right shift with sign extension)</code>
+          </div>
+          <div className="math-block">
+            <p><strong>2. Representative Synthesized Architecture:</strong></p>
+            <p>Variable shifts synthesize into a 5-stage logarithmic multiplexer barrel shifter (stages for 1, 2, 4, 8, and 16 bits) controlled by B[4:0].</p>
+          </div>
+        </div>
+      );
+
+    case "comparator":
+      return (
+        <div className="logic-math-panel">
+          <h3>Magnitude Comparator Implementation</h3>
+          <div className="math-block">
+            <p><strong>1. Direct Chisel Expressions (ALU.scala):</strong></p>
+            <code>Signed SLT:  io.a.asSInt &lt; io.b.asSInt</code>
+            <code>Unsigned SLTU: io.a &lt; io.b</code>
+          </div>
+          <div className="math-block">
+            <p><strong>2. Subtractor Flag Equivalence:</strong></p>
+            <p>Architecturally equivalent to subtractor flags (SLT = N ⊕ V, SLTU = ¬C), directly evaluated in hardware.</p>
           </div>
         </div>
       );
@@ -530,26 +565,27 @@ function renderLogic(unitKey: InspectableUnit, a: number, b: number, result: num
     case "telemetry":
       return (
         <div className="logic-math-panel">
-          <h3>Telemetry &amp; Activity Measurement Formulas</h3>
+          <h3>Result-Bus Telemetry &amp; Activity Measurement</h3>
           <div className="math-block">
-            <p><strong>1. Hamming Distance Switching Metric:</strong></p>
+            <p><strong>1. Result-Bus Hamming Distance Activity Metric:</strong></p>
             <code>Activity = PopCount(Result_t ⊕ Result_&#123;t-1&#125;)</code>
+            <p>Measures bit transitions on the 32-bit ALU output bus during active cycles.</p>
           </div>
           <div className="math-block">
-            <p><strong>2. Energy Proxy:</strong></p>
+            <p><strong>2. Activity-Based Energy Proxy:</strong></p>
             <code>Energy_Proxy = REV_ENERGY_ACC + CLA_SWITCHING + MUL_THERMAL</code>
           </div>
           <div className="math-block">
-            <p><strong>3. Energy-Delay Product (EDP):</strong></p>
-            <code>EDP_CURRENT = Energy_Proxy × EDP_CONFIG</code>
+            <p><strong>3. Energy-Delay Product (EDP) Activity Proxy:</strong></p>
+            <code>EDP_CURRENT = Energy_Proxy × EDP_CONFIG  (where EDP_CONFIG = 1)</code>
           </div>
           <div className="math-block">
-            <p><strong>4. Memory-Mapped Address Map:</strong></p>
-            <code>0x80001000: REV_ENERGY_ACC  (Reversible energy accumulator)</code>
-            <code>0x80001004: CLA_SWITCHING   (CLA bit flip count)</code>
-            <code>0x80001008: MUL_THERMAL     (Multiplier switching/thermal proxy)</code>
-            <code>0x8000100C: EDP_CURRENT     (Current Energy-Delay Product)</code>
-            <code>0x80001010: EDP_CONFIG      (EDP scale configuration constant)</code>
+            <p><strong>4. Memory-Mapped Address Map (0x80001000):</strong></p>
+            <code>0x80001000: REV_ENERGY_ACC  (Reserved reversible counter; fixed to 0)</code>
+            <code>0x80001004: CLA_SWITCHING   (Result-bus Hamming distance on ADD/SUB)</code>
+            <code>0x80001008: MUL_THERMAL     (Result-bus Hamming distance on MUL)</code>
+            <code>0x8000100C: EDP_CURRENT     (Current EDP activity proxy)</code>
+            <code>0x80001010: EDP_CONFIG      (Scale constant fixed to 1; read-only)</code>
           </div>
         </div>
       );

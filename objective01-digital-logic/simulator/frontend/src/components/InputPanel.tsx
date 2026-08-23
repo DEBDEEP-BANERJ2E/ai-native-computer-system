@@ -4,17 +4,14 @@ import {
   RotateCcw,
   FastForward,
   Sparkles,
-  Layers,
   Hash,
   Binary,
   Shuffle,
   Info,
-  CheckCircle,
 } from "lucide-react";
 import {
   OPERATIONS,
   PRESET_TEST_CASES,
-  type Operation,
   type OpCategory,
   type PresetTestCase,
 } from "../types";
@@ -27,7 +24,7 @@ type Props = {
   onA: (value: string) => void;
   onB: (value: string) => void;
   onOpcode: (value: number) => void;
-  onExecute: () => void;
+  onExecute: (overrideA?: number, overrideB?: number, overrideOpcode?: number) => void;
   onReset: () => void;
 };
 
@@ -113,10 +110,13 @@ export function InputPanel({
     if (isAutoRunning || disabled) return;
     setIsAutoRunning(true);
     for (const preset of PRESET_TEST_CASES.slice(0, 5)) {
-      handleApplyPreset(preset);
-      await new Promise((r) => setTimeout(r, 100));
-      onExecute();
-      await new Promise((r) => setTimeout(r, 600));
+      onA(preset.a);
+      onB(preset.b);
+      onOpcode(preset.opcode);
+      const parsedA = Number.parseInt(preset.a, 16) >>> 0;
+      const parsedB = Number.parseInt(preset.b, 16) >>> 0;
+      onExecute(parsedA, parsedB, preset.opcode);
+      await new Promise((r) => setTimeout(r, 650));
     }
     setIsAutoRunning(false);
   };
@@ -315,7 +315,7 @@ export function InputPanel({
       <div className="button-row">
         <button
           className="primary-button"
-          onClick={onExecute}
+          onClick={() => onExecute()}
           disabled={disabled || isAutoRunning}
         >
           <Play size={16} fill="currentColor" />{" "}
