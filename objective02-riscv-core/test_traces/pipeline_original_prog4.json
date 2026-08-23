@@ -1,0 +1,9 @@
+[
+  {"pc": 0, "instruction": 52430099, "rd": 10, "regWrite": true, "writeData": 50, "memRead": false, "memReadReq": false, "memWrite": false, "memWriteReq": false, "memAddress": 50, "memWriteData": 0, "illegal": false},
+  {"pc": 4, "instruction": 16777455, "rd": 1, "regWrite": true, "writeData": 8, "memRead": false, "memReadReq": false, "memWrite": false, "memWriteReq": false, "memAddress": 8, "memWriteData": 0, "illegal": false},
+  {"pc": 20, "instruction": 26543379, "rd": 10, "regWrite": true, "writeData": 75, "memRead": false, "memReadReq": false, "memWrite": false, "memWriteReq": false, "memAddress": 75, "memWriteData": 0, "illegal": false},
+  {"pc": 24, "instruction": 32871, "rd": 0, "regWrite": false, "writeData": 28, "memRead": false, "memReadReq": false, "memWrite": false, "memWriteReq": false, "memAddress": 28, "memWriteData": 0, "illegal": false},
+  {"pc": 8, "instruction": 10814995, "rd": 12, "regWrite": true, "writeData": 85, "memRead": false, "memReadReq": false, "memWrite": false, "memWriteReq": false, "memAddress": 85, "memWriteData": 75, "illegal": false},
+  {"pc": 12, "instruction": 16777327, "rd": 0, "regWrite": false, "writeData": 16, "memRead": false, "memReadReq": false, "memWrite": false, "memWriteReq": false, "memAddress": 16, "memWriteData": 0, "illegal": false},
+  {"pc": 28, "instruction": 1050259, "rd": 13, "regWrite": true, "writeData": 1, "memRead": false, "memReadReq": false, "memWrite": false, "memWriteReq": false, "memAddress": 1, "memWriteData": 8, "illegal": false}
+]
