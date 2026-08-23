@@ -51,6 +51,13 @@ class PipelinedCoreIO extends Bundle {
   val flushIDEX      = Output(Bool())
   val branchTaken    = Output(Bool())
   val redirectTarget = Output(UInt(32.W))
+
+  // Forwarding & Hazard Observability
+  val forwardA       = Output(UInt(2.W))
+  val forwardB       = Output(UInt(2.W))
+  val loadUseHazard  = Output(Bool())
+  val stallIF        = Output(Bool())
+  val stallID        = Output(Bool())
 }
 
 class PipelinedCore(
@@ -64,13 +71,15 @@ class PipelinedCore(
   // =========================================================================
   // 1. Submodule Instantiations
   // =========================================================================
-  val pc       = Module(new ProgramCounter(bootAddress))
-  val imem     = Module(new InstructionMemory(imemDepthWords, initialProgram))
-  val decoder  = Module(new Decoder)
-  val rf       = Module(new RegisterFile)
-  val alu      = Module(new ALU(32)) // Reusing Objective 1 verified arithmetic datapath
-  val bju      = Module(new BranchJumpUnit)
-  val dmem     = Module(new DataMemory(dmemSizeBytes))
+  val pc             = Module(new ProgramCounter(bootAddress))
+  val imem           = Module(new InstructionMemory(imemDepthWords, initialProgram))
+  val decoder        = Module(new Decoder)
+  val rf             = Module(new RegisterFile)
+  val alu            = Module(new ALU(32)) // Reusing Objective 1 verified arithmetic datapath
+  val bju            = Module(new BranchJumpUnit)
+  val dmem           = Module(new DataMemory(dmemSizeBytes))
+  val forwardingUnit = Module(new ForwardingUnit)
+  val hazardUnit     = Module(new HazardUnit)
 
   // Pipeline Registers
   val ifIdReg  = Module(new IF_ID_Register)
@@ -78,22 +87,62 @@ class PipelinedCore(
   val exMemReg = Module(new EX_MEM_Register)
   val memWbReg = Module(new MEM_WB_Register)
 
-  // Control signals for stalls and flushes
-  val flushIFID = Wire(Bool())
-  val flushIDEX = Wire(Bool())
-  val stallIF   = WireDefault(false.B)
-  val stallID   = WireDefault(false.B)
-  val stallEX   = WireDefault(false.B)
-  val stallMEM  = WireDefault(false.B)
-  val stallWB   = WireDefault(false.B)
+  // Forward declarations for control signals
+  val branchTaken    = Wire(Bool())
+  val redirectTarget = Wire(UInt(32.W))
+  val wbRegWrite     = Wire(Bool())
+  val wbRd           = Wire(UInt(5.W))
+  val wbData         = Wire(UInt(32.W))
 
   // =========================================================================
-  // 2. STAGE 1: INSTRUCTION FETCH (IF)
+  // 2. HAZARD DETECTION (ID Stage Consumer vs EX Stage Load Producer)
+  // =========================================================================
+  val idValid       = ifIdReg.io.out.valid
+  val idInstruction = ifIdReg.io.out.instruction
+  val idPc          = ifIdReg.io.out.pc
+  val idPcPlus4     = ifIdReg.io.out.pcPlus4
+
+  decoder.io.instruction := idInstruction
+
+  // Precise consumer source register usage detection
+  val idUsesRs1 = idValid && (
+    decoder.io.controls.aluSrcA === ALUSrcA.RS1 ||
+    decoder.io.controls.branchType =/= BranchType.NONE ||
+    decoder.io.controls.jumpType === JumpType.JALR
+  )
+
+  val idUsesRs2 = idValid && (
+    decoder.io.controls.aluSrcB === ALUSrcB.RS2 ||
+    decoder.io.controls.branchType =/= BranchType.NONE ||
+    decoder.io.controls.memWrite
+  )
+
+  hazardUnit.io.idValid     := idValid
+  hazardUnit.io.idRs1       := decoder.io.rs1
+  hazardUnit.io.idRs2       := decoder.io.rs2
+  hazardUnit.io.idUsesRs1   := idUsesRs1
+  hazardUnit.io.idUsesRs2   := idUsesRs2
+  hazardUnit.io.idExValid   := idExReg.io.out.valid
+  hazardUnit.io.idExMemRead := idExReg.io.out.controls.memRead
+  hazardUnit.io.idExRd      := idExReg.io.out.rd
+  hazardUnit.io.branchTaken := branchTaken
+
+  val stallIF   = hazardUnit.io.stallIF
+  val stallID   = hazardUnit.io.stallID
+  val flushIFID = hazardUnit.io.flushIFID
+  val flushIDEX = hazardUnit.io.flushIDEX
+
+  // =========================================================================
+  // 3. STAGE 1: INSTRUCTION FETCH (IF)
   // =========================================================================
   val programLengthBytes = if (initialProgram.nonEmpty) initialProgram.length * 4 else imemDepthWords * 4
   imem.io.address := pc.io.pc
   val ifInstruction = imem.io.instruction
   val ifValid = (pc.io.pc < programLengthBytes.U)
+
+  pc.io.stall            := stallIF
+  pc.io.jumpBranchTaken  := branchTaken
+  pc.io.jumpBranchTarget := redirectTarget
 
   ifIdReg.io.stall := stallID
   ifIdReg.io.flush := flushIFID
@@ -103,26 +152,16 @@ class PipelinedCore(
   ifIdReg.io.in.instruction := ifInstruction
 
   // =========================================================================
-  // 3. STAGE 2: INSTRUCTION DECODE & OPERAND FETCH (ID)
+  // 4. STAGE 2: INSTRUCTION DECODE & OPERAND FETCH (ID)
   // =========================================================================
-  val idValid       = ifIdReg.io.out.valid
-  val idPc          = ifIdReg.io.out.pc
-  val idPcPlus4     = ifIdReg.io.out.pcPlus4
-  val idInstruction = ifIdReg.io.out.instruction
+  rf.io.rs1Address := decoder.io.rs1
+  rf.io.rs2Address := decoder.io.rs2
 
-  decoder.io.instruction := idInstruction
-  rf.io.rs1Address       := decoder.io.rs1
-  rf.io.rs2Address       := decoder.io.rs2
-
-  // WB -> ID Same-Cycle Register Bypass (when WB writes to rd on the same cycle ID reads it)
-  val wbRegWrite = Wire(Bool())
-  val wbRd       = Wire(UInt(5.W))
-  val wbData     = Wire(UInt(32.W))
-
+  // WB -> ID Same-Cycle Register Bypass
   val idRs1Val = Mux(wbRegWrite && (wbRd =/= 0.U) && (wbRd === decoder.io.rs1), wbData, rf.io.rs1Data)
   val idRs2Val = Mux(wbRegWrite && (wbRd =/= 0.U) && (wbRd === decoder.io.rs2), wbData, rf.io.rs2Data)
 
-  idExReg.io.stall := stallEX
+  idExReg.io.stall := false.B
   idExReg.io.flush := flushIDEX
   idExReg.io.in.valid       := idValid && !flushIDEX
   idExReg.io.in.pc          := idPc
@@ -137,7 +176,7 @@ class PipelinedCore(
   idExReg.io.in.controls    := decoder.io.controls
 
   // =========================================================================
-  // 4. STAGE 3: EXECUTE & BRANCH EVALUATION (EX)
+  // 5. STAGE 3: EXECUTE, FORWARDING & BRANCH EVALUATION (EX)
   // =========================================================================
   val exValid       = idExReg.io.out.valid
   val exPc          = idExReg.io.out.pc
@@ -145,52 +184,69 @@ class PipelinedCore(
   val exInstruction = idExReg.io.out.instruction
   val exControls    = idExReg.io.out.controls
 
-  // Operand selection
+  // Data Forwarding Unit Connections
+  forwardingUnit.io.idExRs1       := idExReg.io.out.rs1
+  forwardingUnit.io.idExRs2       := idExReg.io.out.rs2
+  forwardingUnit.io.exMemValid    := exMemReg.io.out.valid
+  forwardingUnit.io.exMemRegWrite := exMemReg.io.out.regWrite
+  forwardingUnit.io.exMemMemRead  := exMemReg.io.out.memRead
+  forwardingUnit.io.exMemRd       := exMemReg.io.out.rd
+  forwardingUnit.io.memWbValid    := memWbReg.io.out.valid
+  forwardingUnit.io.memWbRegWrite := memWbReg.io.out.regWrite
+  forwardingUnit.io.memWbRd       := memWbReg.io.out.rd
+
+  // EX/MEM forwarding data (excluding loads)
+  val exMemForwardData = MuxLookup(exMemReg.io.out.wbSource, exMemReg.io.out.aluResult)(Seq(
+    WBSource.ALU       -> exMemReg.io.out.aluResult,
+    WBSource.PC_PLUS_4 -> exMemReg.io.out.pcPlus4,
+    WBSource.IMM       -> exMemReg.io.out.imm
+  ))
+
+  // Resolved forwarded source register values
+  val forwardedRs1 = Mux(forwardingUnit.io.forwardA === 2.U, exMemForwardData,
+                     Mux(forwardingUnit.io.forwardA === 1.U, wbData, idExReg.io.out.rs1Data))
+
+  val forwardedRs2 = Mux(forwardingUnit.io.forwardB === 2.U, exMemForwardData,
+                     Mux(forwardingUnit.io.forwardB === 1.U, wbData, idExReg.io.out.rs2Data))
+
+  // Operand selection using forwarded register values
   val operandA = MuxLookup(exControls.aluSrcA, 0.U(32.W))(Seq(
-    ALUSrcA.RS1  -> idExReg.io.out.rs1Data,
+    ALUSrcA.RS1  -> forwardedRs1,
     ALUSrcA.PC   -> exPc,
     ALUSrcA.ZERO -> 0.U(32.W)
   ))
 
   val operandB = MuxLookup(exControls.aluSrcB, 0.U(32.W))(Seq(
-    ALUSrcB.RS2  -> idExReg.io.out.rs2Data,
+    ALUSrcB.RS2  -> forwardedRs2,
     ALUSrcB.IMM  -> idExReg.io.out.imm,
     ALUSrcB.FOUR -> 4.U(32.W)
   ))
 
-  // Objective 1 ALU
+  // Objective 1 ALU execution
   alu.io.a      := operandA
   alu.io.b      := operandB
   alu.io.opcode := exControls.aluOp
 
-  // Branch and Jump evaluation
+  // Branch and Jump evaluation using forwarded register values
   bju.io.pc         := exPc
-  bju.io.rs1Data    := idExReg.io.out.rs1Data
-  bju.io.rs2Data    := idExReg.io.out.rs2Data
+  bju.io.rs1Data    := forwardedRs1
+  bju.io.rs2Data    := forwardedRs2
   bju.io.imm        := idExReg.io.out.imm
   bju.io.branchType := exControls.branchType
   bju.io.jumpType   := exControls.jumpType
 
-  val branchTaken    = exValid && bju.io.taken
-  val redirectTarget = bju.io.targetAddress
+  branchTaken    := exValid && bju.io.taken
+  redirectTarget := bju.io.targetAddress
 
-  // Connect PC redirect and control flush
-  pc.io.stall            := stallIF
-  pc.io.jumpBranchTaken  := branchTaken
-  pc.io.jumpBranchTarget := redirectTarget
-
-  flushIFID := branchTaken
-  flushIDEX := branchTaken
-
-  exMemReg.io.stall := stallMEM
-  exMemReg.io.flush := false.B // No flush needed in MEM
+  exMemReg.io.stall := false.B
+  exMemReg.io.flush := false.B
   exMemReg.io.in.valid              := exValid
   exMemReg.io.in.pc                 := exPc
   exMemReg.io.in.pcPlus4            := exPcPlus4
   exMemReg.io.in.instruction        := exInstruction
   exMemReg.io.in.rd                 := idExReg.io.out.rd
   exMemReg.io.in.aluResult          := alu.io.result
-  exMemReg.io.in.rs2Data            := idExReg.io.out.rs2Data
+  exMemReg.io.in.rs2Data            := forwardedRs2 // Forwarded store payload
   exMemReg.io.in.imm                := idExReg.io.out.imm
   exMemReg.io.in.regWrite           := exControls.regWrite
   exMemReg.io.in.memRead            := exControls.memRead
@@ -200,7 +256,7 @@ class PipelinedCore(
   exMemReg.io.in.illegalInstruction := exControls.illegalInstruction
 
   // =========================================================================
-  // 5. STAGE 4: MEMORY ACCESS (MEM)
+  // 6. STAGE 4: MEMORY ACCESS (MEM)
   // =========================================================================
   val memValid       = exMemReg.io.out.valid
   val memPc          = exMemReg.io.out.pc
@@ -213,7 +269,7 @@ class PipelinedCore(
   dmem.io.memWrite  := memValid && exMemReg.io.out.memWrite
   dmem.io.memWidth  := exMemReg.io.out.memWidth
 
-  memWbReg.io.stall := stallWB
+  memWbReg.io.stall := false.B
   memWbReg.io.flush := false.B
   memWbReg.io.in.valid              := memValid
   memWbReg.io.in.pc                 := memPc
@@ -234,7 +290,7 @@ class PipelinedCore(
   memWbReg.io.in.illegalInstruction := exMemReg.io.out.illegalInstruction
 
   // =========================================================================
-  // 6. STAGE 5: WRITEBACK & RETIREMENT (WB)
+  // 7. STAGE 5: WRITEBACK & RETIREMENT (WB)
   // =========================================================================
   val wbValid       = memWbReg.io.out.valid
   val wbPc          = memWbReg.io.out.pc
@@ -255,7 +311,7 @@ class PipelinedCore(
   rf.io.writeEnable := wbRegWrite
 
   // =========================================================================
-  // 7. Architectural Commit / Retirement Interface
+  // 8. Architectural Commit / Retirement Interface
   // =========================================================================
   io.commit.valid        := wbValid
   io.commit.pc           := wbPc
@@ -272,7 +328,7 @@ class PipelinedCore(
   io.commit.illegal      := memWbReg.io.out.illegalInstruction
 
   // =========================================================================
-  // 8. Pipeline Observability Probes
+  // 9. Pipeline Observability Probes
   // =========================================================================
   io.stageIF.valid       := ifValid
   io.stageIF.pc          := pc.io.pc
@@ -298,4 +354,10 @@ class PipelinedCore(
   io.flushIDEX      := flushIDEX
   io.branchTaken    := branchTaken
   io.redirectTarget := redirectTarget
+
+  io.forwardA       := forwardingUnit.io.forwardA
+  io.forwardB       := forwardingUnit.io.forwardB
+  io.loadUseHazard  := hazardUnit.io.loadUseHazard
+  io.stallIF        := stallIF
+  io.stallID        := stallID
 }
