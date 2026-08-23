@@ -5,6 +5,7 @@ import chisel3.util._
 import objective02.decode._
 import objective02.datapath.{BranchJumpUnit, ProgramCounter, RegisterFile}
 import objective02.memory.{DataMemory, InstructionMemory}
+import objective02.execute.{RV32MMultiplier, IterativeDivider}
 import objective01.datapath.ALU
 
 // =========================================================================
@@ -58,6 +59,13 @@ class PipelinedCoreIO extends Bundle {
   val loadUseHazard  = Output(Bool())
   val stallIF        = Output(Bool())
   val stallID        = Output(Bool())
+
+  // M-extension Observability
+  val mOp              = Output(UInt(4.W))
+  val mulActive        = Output(Bool())
+  val dividerBusy      = Output(Bool())
+  val dividerDone      = Output(Bool())
+  val dividerIteration = Output(UInt(6.W))
 }
 
 class PipelinedCore(
@@ -73,13 +81,15 @@ class PipelinedCore(
   // =========================================================================
   val pc             = Module(new ProgramCounter(bootAddress))
   val imem           = Module(new InstructionMemory(imemDepthWords, initialProgram))
-  val decoder        = Module(new Decoder)
+  val decoder        = Module(new Decoder(enableFullM = true))
   val rf             = Module(new RegisterFile)
   val alu            = Module(new ALU(32)) // Reusing Objective 1 verified arithmetic datapath
   val bju            = Module(new BranchJumpUnit)
   val dmem           = Module(new DataMemory(dmemSizeBytes))
   val forwardingUnit = Module(new ForwardingUnit)
   val hazardUnit     = Module(new HazardUnit)
+  val rv32mMult      = Module(new RV32MMultiplier)
+  val divRem         = Module(new IterativeDivider)
 
   // Pipeline Registers
   val ifIdReg  = Module(new IF_ID_Register)
@@ -127,8 +137,14 @@ class PipelinedCore(
   hazardUnit.io.idExRd      := idExReg.io.out.rd
   hazardUnit.io.branchTaken := branchTaken
 
-  val stallIF   = hazardUnit.io.stallIF
-  val stallID   = hazardUnit.io.stallID
+  // Divider EX Hold Logic
+  val exValid       = idExReg.io.out.valid
+  val exControls    = idExReg.io.out.controls
+  val isDivOp       = exControls.mOp === MOp.DIV || exControls.mOp === MOp.DIVU || exControls.mOp === MOp.REM || exControls.mOp === MOp.REMU
+  val divHold       = exValid && isDivOp && !divRem.io.done
+
+  val stallIF   = hazardUnit.io.stallIF || divHold
+  val stallID   = hazardUnit.io.stallID || divHold
   val flushIFID = hazardUnit.io.flushIFID
   val flushIDEX = hazardUnit.io.flushIDEX
 
@@ -161,7 +177,7 @@ class PipelinedCore(
   val idRs1Val = Mux(wbRegWrite && (wbRd =/= 0.U) && (wbRd === decoder.io.rs1), wbData, rf.io.rs1Data)
   val idRs2Val = Mux(wbRegWrite && (wbRd =/= 0.U) && (wbRd === decoder.io.rs2), wbData, rf.io.rs2Data)
 
-  idExReg.io.stall := false.B
+  idExReg.io.stall := divHold
   idExReg.io.flush := flushIDEX
   idExReg.io.in.valid       := idValid && !flushIDEX
   idExReg.io.in.pc          := idPc
@@ -178,11 +194,9 @@ class PipelinedCore(
   // =========================================================================
   // 5. STAGE 3: EXECUTE, FORWARDING & BRANCH EVALUATION (EX)
   // =========================================================================
-  val exValid       = idExReg.io.out.valid
   val exPc          = idExReg.io.out.pc
   val exPcPlus4     = idExReg.io.out.pcPlus4
   val exInstruction = idExReg.io.out.instruction
-  val exControls    = idExReg.io.out.controls
 
   // Data Forwarding Unit Connections
   forwardingUnit.io.idExRs1       := idExReg.io.out.rs1
@@ -227,6 +241,22 @@ class PipelinedCore(
   alu.io.b      := operandB
   alu.io.opcode := exControls.aluOp
 
+  // Phase 5A: RV32M Multiplier
+  rv32mMult.io.rs1 := forwardedRs1
+  rv32mMult.io.rs2 := forwardedRs2
+  rv32mMult.io.mOp := exControls.mOp
+
+  // Phase 5B: Iterative Divider
+  divRem.io.dividend := forwardedRs1
+  divRem.io.divisor  := forwardedRs2
+  divRem.io.isSigned := (exControls.mOp === MOp.DIV) || (exControls.mOp === MOp.REM)
+  divRem.io.start    := exValid && isDivOp && !divRem.io.busy
+
+  // Result Multiplexing
+  val exResult = Mux(exControls.isMul, rv32mMult.io.result,
+                 Mux(isDivOp, Mux(exControls.mOp === MOp.DIV || exControls.mOp === MOp.DIVU, divRem.io.quotient, divRem.io.remainder),
+                 alu.io.result))
+
   // Branch and Jump evaluation using forwarded register values
   bju.io.pc         := exPc
   bju.io.rs1Data    := forwardedRs1
@@ -240,12 +270,12 @@ class PipelinedCore(
 
   exMemReg.io.stall := false.B
   exMemReg.io.flush := false.B
-  exMemReg.io.in.valid              := exValid
+  exMemReg.io.in.valid              := exValid && !divHold
   exMemReg.io.in.pc                 := exPc
   exMemReg.io.in.pcPlus4            := exPcPlus4
   exMemReg.io.in.instruction        := exInstruction
   exMemReg.io.in.rd                 := idExReg.io.out.rd
-  exMemReg.io.in.aluResult          := alu.io.result
+  exMemReg.io.in.aluResult          := exResult
   exMemReg.io.in.rs2Data            := forwardedRs2 // Forwarded store payload
   exMemReg.io.in.imm                := idExReg.io.out.imm
   exMemReg.io.in.regWrite           := exControls.regWrite
@@ -360,4 +390,10 @@ class PipelinedCore(
   io.loadUseHazard  := hazardUnit.io.loadUseHazard
   io.stallIF        := stallIF
   io.stallID        := stallID
+
+  io.mOp              := exControls.mOp
+  io.mulActive        := exControls.isMul
+  io.dividerBusy      := divRem.io.busy
+  io.dividerDone      := divRem.io.done
+  io.dividerIteration := divRem.io.iteration
 }

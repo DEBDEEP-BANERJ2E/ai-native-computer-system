@@ -14,7 +14,7 @@ class DecoderIO extends Bundle {
   val imm         = Output(UInt(32.W))
 }
 
-class Decoder extends Module {
+class Decoder(val enableFullM: Boolean = false) extends Module {
   val io = IO(new DecoderIO)
 
   val inst = io.instruction
@@ -78,13 +78,23 @@ class Decoder extends Module {
           ctrl.illegalInstruction := true.B
         }
       }.elsewhen(f7 === FUNCT7_MULDIV) {
-        // RV32M Extension: only lower-word MUL is backed by Objective 1 hardware
+        // RV32M Extension
         when(f3 === FUNCT3_MUL) {
           ctrl.aluOp := ALUOps.MUL
           ctrl.isMul := true.B
           ctrl.mOp   := MOp.MUL
+        }.elsewhen(enableFullM.B) {
+          switch(f3) {
+            is(FUNCT3_MULH)   { ctrl.mOp := MOp.MULH }
+            is(FUNCT3_MULHSU) { ctrl.mOp := MOp.MULHSU }
+            is(FUNCT3_MULHU)  { ctrl.mOp := MOp.MULHU }
+            is(FUNCT3_DIV)    { ctrl.mOp := MOp.DIV }
+            is(FUNCT3_DIVU)   { ctrl.mOp := MOp.DIVU }
+            is(FUNCT3_REM)    { ctrl.mOp := MOp.REM }
+            is(FUNCT3_REMU)   { ctrl.mOp := MOp.REMU }
+          }
         }.otherwise {
-          // MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU are marked illegal until Phase 5 execution units
+          // If not enableFullM, MUL is legal but other M-extension ops are illegal
           ctrl.illegalInstruction := true.B
         }
       }.otherwise {

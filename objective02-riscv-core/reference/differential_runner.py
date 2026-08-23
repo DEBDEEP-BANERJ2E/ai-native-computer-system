@@ -102,6 +102,24 @@ ORIGINAL_BENCHMARKS = {
 }
 
 # =========================================================================
+# Part 1.5: RV32M Benchmarks (2-Way Differential: Python <==> PipelinedCore)
+# =========================================================================
+RV32M_BENCHMARKS = {
+    "prog_div": {
+        "name": "Phase 5C RV32M Divider Integration",
+        "code": [
+            0x00a00093, # 0x00: addi x1, x0, 10
+            0x00300113, # 0x04: addi x2, x0, 3
+            0x0220c1b3, # 0x08: div  x3, x1, x2 (3)
+            0x0220e233, # 0x0C: rem  x4, x1, x2 (1)
+            0x003182b3  # 0x10: add  x5, x3, x3 (6)
+        ],
+        "cycles": 5, # retirement events count = 5
+        "pipe_trace": "test_traces/progDiv.json"
+    }
+}
+
+# =========================================================================
 # Part 2: Three Canonical Hazard-Free Programs (Preserved from Phase 3.1)
 # =========================================================================
 PIPELINE_3WAY_PROGRAMS = {
@@ -249,7 +267,37 @@ def run_differential_comparison(use_existing_traces: bool = False):
         passed_orig_programs += 1
 
     print("\n" + "=" * 80)
-    print("SECTION 2: 3-WAY DIFFERENTIAL VERIFICATION ON CANONICAL BENCHMARKS")
+    print("SECTION 2: 2-WAY DIFFERENTIAL VERIFICATION ON RV32M MULTI-CYCLE")
+    print("           (PYTHON REFERENCE <==> PIPELINED CORE)")
+    print("=" * 80)
+
+    total_rv32m_events = 0
+    passed_rv32m_programs = 0
+
+    for prog_key, prog_info in RV32M_BENCHMARKS.items():
+        print(f"\nVerifying 2-Way Parity on {prog_info['name']}...")
+        with open(prog_info["pipe_trace"], "r") as f:
+            pipe_events = json.load(f)
+
+        interp = RV32Interpreter()
+        interp.load_program(prog_info["code"])
+        py_trace = interp.run(prog_info["cycles"])
+
+        assert len(py_trace) == len(pipe_events), (
+            f"Python ({len(py_trace)}) vs PipelinedCore ({len(pipe_events)}) retirement count mismatch"
+        )
+
+        for i in range(len(py_trace)):
+            total_rv32m_events += 1
+            py_ev = py_trace[i]
+            pipe_ev = pipe_events[i]
+            compare_event("Python", py_ev, "PipelinedCore", pipe_ev, i)
+
+        print(f"  [PASS] All {len(py_trace)} retirement events matched 1:1 across Python and PipelinedCore!")
+        passed_rv32m_programs += 1
+
+    print("\n" + "=" * 80)
+    print("SECTION 3: 3-WAY DIFFERENTIAL VERIFICATION ON CANONICAL BENCHMARKS")
     print("=" * 80)
 
     total_canon_events = 0
@@ -289,7 +337,8 @@ def run_differential_comparison(use_existing_traces: bool = False):
     print("\n" + "=" * 80)
     print("DIFFERENTIAL VERIFICATION SUMMARY:")
     print(f"  1. Original 5 Benchmarks (3-Way Bit-Exact Parity): {passed_orig_programs}/{len(ORIGINAL_BENCHMARKS)} Programs ({total_orig_events} events bit-exact across Python, SingleCycleCore, and PipelinedCore)")
-    print(f"  2. Canonical Benchmarks  (3-Way Bit-Exact Parity): {passed_canon_programs}/{len(PIPELINE_3WAY_PROGRAMS)} Programs ({total_canon_events} events bit-exact across Python, SingleCycleCore, and PipelinedCore)")
+    print(f"  2. RV32M Benchmarks      (2-Way Bit-Exact Parity): {passed_rv32m_programs}/{len(RV32M_BENCHMARKS)} Programs ({total_rv32m_events} events bit-exact across Python and PipelinedCore)")
+    print(f"  3. Canonical Benchmarks  (3-Way Bit-Exact Parity): {passed_canon_programs}/{len(PIPELINE_3WAY_PROGRAMS)} Programs ({total_canon_events} events bit-exact across Python, SingleCycleCore, and PipelinedCore)")
     print("=" * 80)
 
 if __name__ == "__main__":

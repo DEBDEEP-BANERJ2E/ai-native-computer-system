@@ -117,11 +117,44 @@ class RV32Interpreter:
                     write_data = (s_val1 >> (val2 & 0x1F)) & 0xFFFFFFFF # SRA
                 else:
                     illegal = True
-            elif funct7 == 0x01 and funct3 == 0: # MUL
+            elif funct7 == 0x01: # Full RV32M
                 reg_write = True
-                write_data = (s_val1 * s_val2) & 0xFFFFFFFF
-            else:
-                illegal = True
+                if funct3 == 0: # MUL
+                    write_data = (val1 * val2) & 0xFFFFFFFF
+                elif funct3 == 1: # MULH
+                    write_data = ((s_val1 * s_val2) >> 32) & 0xFFFFFFFF
+                elif funct3 == 2: # MULHSU
+                    write_data = ((s_val1 * val2) >> 32) & 0xFFFFFFFF
+                elif funct3 == 3: # MULHU
+                    write_data = ((val1 * val2) >> 32) & 0xFFFFFFFF
+                elif funct3 == 4: # DIV
+                    if val2 == 0:
+                        write_data = 0xFFFFFFFF
+                    elif s_val1 == -2147483648 and s_val2 == -1:
+                        write_data = 0x80000000
+                    else:
+                        write_data = int(s_val1 / s_val2) & 0xFFFFFFFF
+                elif funct3 == 5: # DIVU
+                    if val2 == 0:
+                        write_data = 0xFFFFFFFF
+                    else:
+                        write_data = (val1 // val2) & 0xFFFFFFFF
+                elif funct3 == 6: # REM
+                    if val2 == 0:
+                        write_data = val1
+                    elif s_val1 == -2147483648 and s_val2 == -1:
+                        write_data = 0
+                    else:
+                        quot = int(s_val1 / s_val2)
+                        write_data = (s_val1 - quot * s_val2) & 0xFFFFFFFF
+                elif funct3 == 7: # REMU
+                    if val2 == 0:
+                        write_data = val1
+                    else:
+                        write_data = (val1 % val2) & 0xFFFFFFFF
+                else:
+                    illegal = True
+                    reg_write = False
 
         elif opcode == 0x13: # I-Type
             reg_write = True

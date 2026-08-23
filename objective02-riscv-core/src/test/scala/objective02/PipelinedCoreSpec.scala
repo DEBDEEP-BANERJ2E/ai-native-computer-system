@@ -425,5 +425,39 @@ class PipelinedCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Matc
       }
       recordPipelineTrace("pipelined_core_prog3", trace)
     }
+  } // Added missing closing brace
+
+  // -------------------------------------------------------------
+  // Test 5: RV32M Divider Multi-cycle Pipeline Integration
+  // -------------------------------------------------------------
+  it should "stall pipeline correctly during division and forward quotient/remainder" in {
+    val progDiv = Seq(
+      BigInt("00a00093", 16), // 0x00: addi x1, x0, 10
+      BigInt("00300113", 16), // 0x04: addi x2, x0, 3
+      BigInt("0220c1b3", 16), // 0x08: div  x3, x1, x2 (30-34 cycles, x3 = 3)
+      BigInt("0220e233", 16), // 0x0C: rem  x4, x1, x2 (x4 = 1)
+      BigInt("003182b3", 16)  // 0x10: add  x5, x3, x3 (x5 = 6)
+    )
+
+    test(new PipelinedCore(initialProgram = progDiv)) { dut =>
+      val retiredPcs = scala.collection.mutable.ArrayBuffer[BigInt]()
+      val retiredVals = scala.collection.mutable.ArrayBuffer[BigInt]()
+      val trace = scala.collection.mutable.ArrayBuffer[String]()
+
+      for (_ <- 0 until 100) {
+        val ret = captureRetirementEvent(dut)
+        if (ret.isDefined) {
+          retiredPcs += dut.io.commit.pc.peek().litValue
+          retiredVals += dut.io.commit.writeData.peek().litValue
+          trace += ret.get
+        }
+        dut.clock.step(1)
+      }
+
+      recordPipelineTrace("progDiv", trace)
+
+      retiredPcs shouldBe Seq(BigInt(0x00), BigInt(0x04), BigInt(0x08), BigInt(0x0C), BigInt(0x10))
+      retiredVals shouldBe Seq(BigInt(10), BigInt(3), BigInt(3), BigInt(1), BigInt(6))
+    }
   }
 }
