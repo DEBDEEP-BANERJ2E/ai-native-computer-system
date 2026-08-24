@@ -87,6 +87,14 @@ class SystemMMIO extends Module {
   }
 
   // =========================================================================
+  // 4. Address Decoding & Data Isolation
+  // =========================================================================
+  val windowHit = (io.address(31, 16) === "h8000".U)
+  io.windowHit := windowHit
+
+  val isAlignedWord = (io.address(1, 0) === 0.U) && (io.memWidth === MemWidth.WORD)
+
+  // =========================================================================
   // 3. Security Event Sticky Logger Window
   // =========================================================================
   val secPendingReg    = RegInit(false.B)
@@ -96,8 +104,15 @@ class SystemMMIO extends Module {
   val secReasonReg     = RegInit(0.U(4.W))
   val secContextReg    = RegInit(0.U(32.W))
 
-  // Sticky first-event capture
-  when(io.securityEvent.valid && !secPendingReg) {
+  // Write-1-to-clear request on SEC_STATUS[0]
+  val w1cClear = isAlignedWord && io.memWriteReq && (io.address === MMIOAddress.SEC_STATUS) && (io.writeData(0) === 1.U)
+
+  when(w1cClear) {
+    secPendingReg := false.B
+  }
+
+  // Sticky first-event capture with new-event priority over simultaneous W1C clear
+  when(io.securityEvent.valid && (!secPendingReg || w1cClear)) {
     secPendingReg    := true.B
     secPcReg         := io.securityEvent.pc
     secAddrReg       := io.securityEvent.address
@@ -105,14 +120,6 @@ class SystemMMIO extends Module {
     secReasonReg     := io.securityEvent.reason
     secContextReg    := io.securityEvent.context
   }
-
-  // =========================================================================
-  // 4. Address Decoding & Data Isolation
-  // =========================================================================
-  val windowHit = (io.address(31, 16) === "h8000".U)
-  io.windowHit := windowHit
-
-  val isAlignedWord = (io.address(1, 0) === 0.U) && (io.memWidth === MemWidth.WORD)
 
   // Default values
   val readDataWire     = WireDefault(0.U(32.W))
@@ -147,9 +154,9 @@ class SystemMMIO extends Module {
           readAcceptedWire := true.B
         }
 
-        // Objective 2 System Registers Window
+        // Objective 2 System Control / Performance Counter Window
         is(MMIOAddress.BRANCH_CONFIDENCE) {
-          readDataWire     := 0.U // Reserved for Phase 6
+          readDataWire     := 0.U // Reserved, read-only
           readAcceptedWire := true.B
         }
         is(MMIOAddress.PROCESS_BEHAVIOR_CLASS) {
@@ -224,10 +231,6 @@ class SystemMMIO extends Module {
         }
         is(MMIOAddress.SEC_STATUS) {
           writeAcceptedWire := true.B
-          // Write-1-to-clear bit 0
-          when(io.writeData(0) === 1.U) {
-            secPendingReg := false.B
-          }
         }
       }
     }

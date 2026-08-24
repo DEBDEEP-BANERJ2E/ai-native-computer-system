@@ -183,6 +183,20 @@ MMIO_BENCHMARKS = {
         ],
         "cycles": 26,
         "pipe_trace": "test_traces/progMMIO.json"
+    },
+    "progBranchMMIO": {
+        "name": "Phase 6 Branch Execution Telemetry (CLA Switching Integration)",
+        "code": [
+            0x80001537, # 0x00: lui x10, 0x80001
+            0x00f00093, # 0x04: addi x1, x0, 15
+            0x00f00113, # 0x08: addi x2, x0, 15
+            0x00208663, # 0x0C: beq x1, x2, 12
+            0x3e700193, # 0x10: addi x3, x0, 999
+            0x00000013, # 0x14: nop
+            0x00452203  # 0x18: lw x4, 4(x10)
+        ],
+        "cycles": 5,
+        "pipe_trace": "test_traces/progBranchMMIO.json"
     }
 }
 

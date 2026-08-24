@@ -298,4 +298,95 @@ class SystemMMIOSpec extends AnyFlatSpec with ChiselScalatestTester with Matcher
       dut.io.readData.expect(0.U)
     }
   }
+
+  it should "prioritize new security violation arrival over simultaneous W1C clear when pending is 0" in {
+    test(new SystemMMIO) { dut =>
+      dut.io.memWidth.poke(MemWidth.WORD)
+
+      // Simultaneous W1C write (clear) + incoming security event when pending=0
+      dut.io.memWriteReq.poke(true.B)
+      dut.io.address.poke(MMIOAddress.SEC_STATUS)
+      dut.io.writeData.poke(1.U)
+
+      dut.io.securityEvent.valid.poke(true.B)
+      dut.io.securityEvent.pc.poke("h00000111".U)
+      dut.io.securityEvent.address.poke("h80002222".U)
+      dut.io.securityEvent.accessType.poke(AccessType.READ)
+      dut.io.securityEvent.reason.poke(SecurityReason.READ_PERMISSION)
+      dut.io.securityEvent.context.poke("h00000001".U)
+
+      dut.clock.step(1)
+
+      dut.io.memWriteReq.poke(false.B)
+      dut.io.securityEvent.valid.poke(false.B)
+
+      // Verify new event is captured and pending is 1
+      dut.io.memReadReq.poke(true.B)
+      dut.io.address.poke(MMIOAddress.SEC_STATUS)
+      dut.clock.step(1)
+      dut.io.readData.expect(1.U)
+
+      dut.io.address.poke(MMIOAddress.SEC_PC)
+      dut.clock.step(1)
+      dut.io.readData.expect("h00000111".U)
+    }
+  }
+
+  it should "replace old evidence with new violation when clear and new event arrive simultaneously while pending is 1" in {
+    test(new SystemMMIO) { dut =>
+      dut.io.memWidth.poke(MemWidth.WORD)
+
+      // Step 1: Capture initial event
+      dut.io.securityEvent.valid.poke(true.B)
+      dut.io.securityEvent.pc.poke("h00000111".U)
+      dut.io.securityEvent.address.poke("h80001111".U)
+      dut.io.securityEvent.accessType.poke(AccessType.WRITE)
+      dut.io.securityEvent.reason.poke(SecurityReason.BOUNDS)
+      dut.io.securityEvent.context.poke("h00000002".U)
+      dut.clock.step(1)
+      dut.io.securityEvent.valid.poke(false.B)
+
+      // Verify pending is 1 with first event
+      dut.io.memReadReq.poke(true.B)
+      dut.io.address.poke(MMIOAddress.SEC_PC)
+      dut.clock.step(1)
+      dut.io.readData.expect("h00000111".U)
+
+      // Step 2: Simultaneously issue W1C clear AND new security violation event
+      dut.io.memReadReq.poke(false.B)
+      dut.io.memWriteReq.poke(true.B)
+      dut.io.address.poke(MMIOAddress.SEC_STATUS)
+      dut.io.writeData.poke(1.U)
+
+      dut.io.securityEvent.valid.poke(true.B)
+      dut.io.securityEvent.pc.poke("h00000333".U)
+      dut.io.securityEvent.address.poke("h80004444".U)
+      dut.io.securityEvent.accessType.poke(AccessType.EXECUTE)
+      dut.io.securityEvent.reason.poke(SecurityReason.EXECUTE_PERMISSION)
+      dut.io.securityEvent.context.poke("h00000005".U)
+      dut.clock.step(1)
+
+      dut.io.memWriteReq.poke(false.B)
+      dut.io.securityEvent.valid.poke(false.B)
+
+      // Verify new violation replaced old evidence and pending remains 1
+      dut.io.memReadReq.poke(true.B)
+      dut.io.address.poke(MMIOAddress.SEC_STATUS)
+      dut.clock.step(1)
+      dut.io.readData.expect(1.U)
+
+      dut.io.address.poke(MMIOAddress.SEC_PC)
+      dut.clock.step(1)
+      dut.io.readData.expect("h00000333".U)
+
+      dut.io.address.poke(MMIOAddress.SEC_ADDR)
+      dut.clock.step(1)
+      dut.io.readData.expect("h80004444".U)
+
+      dut.io.address.poke(MMIOAddress.SEC_INFO)
+      dut.clock.step(1)
+      val expectedInfo = (2 << 4) | 5 // EXECUTE (2), EXECUTE_PERMISSION (5)
+      dut.io.readData.expect(expectedInfo.U)
+    }
+  }
 }

@@ -280,7 +280,7 @@ class PipelinedCore(
   val exTelemetryMulActive = WireDefault(false.B)
   val exTelemetryResult    = exResult
 
-  when(exValid && !divHold) {
+  when(exValid && !divHold && !exControls.illegalInstruction && !exControls.isSecurityOp) {
     when(exControls.isMul) {
       exTelemetryValid     := true.B
       exTelemetryMulActive := true.B

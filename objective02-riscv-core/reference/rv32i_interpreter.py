@@ -410,14 +410,22 @@ class RV32Interpreter:
 
         elif opcode == 0x63: # Branch
             take = False
-            telem_valid = True; telem_res = (val1 ^ val2) & 0xFFFFFFFF
-            if funct3 == 0: take = (val1 == val2) # BEQ
-            elif funct3 == 1: take = (val1 != val2) # BNE
-            elif funct3 == 4: take = (s_val1 < s_val2) # BLT
-            elif funct3 == 5: take = (s_val1 >= s_val2) # BGE
-            elif funct3 == 6: take = (val1 < val2) # BLTU
-            elif funct3 == 7: take = (val1 >= val2) # BGEU
-            else: illegal = True
+            telem_valid = True
+            if funct3 in (0, 1): # BEQ, BNE use SUB in ALU
+                telem_cla = True
+                telem_res = (val1 - val2) & 0xFFFFFFFF
+                take = (val1 == val2) if funct3 == 0 else (val1 != val2)
+            elif funct3 in (4, 5): # BLT, BGE use SLT in ALU (signed)
+                telem_cla = False
+                telem_res = 1 if s_val1 < s_val2 else 0
+                take = (s_val1 < s_val2) if funct3 == 4 else (s_val1 >= s_val2)
+            elif funct3 in (6, 7): # BLTU, BGEU use SLTU in ALU (unsigned)
+                telem_cla = False
+                telem_res = 1 if val1 < val2 else 0
+                take = (val1 < val2) if funct3 == 6 else (val1 >= val2)
+            else:
+                illegal = True
+                telem_valid = False
             if take:
                 next_pc = (current_pc + imm_b) & 0xFFFFFFFF
                 self.branch_taken_count += 1
@@ -444,6 +452,10 @@ class RV32Interpreter:
             write_data = (current_pc + imm_u) & 0xFFFFFFFF
             telem_valid = True; telem_cla = True; telem_res = write_data
 
+        elif opcode == 0x0B: # OP_SECURITY placeholder
+            # Deliberately a legal placeholder in Phase 6 with no architectural side effects or telemetry
+            pass
+
         else:
             illegal = True
 
@@ -454,6 +466,7 @@ class RV32Interpreter:
             mem_read_req = False
             mem_write = False
             mem_write_req = False
+            telem_valid = False
 
         if reg_write and rd != 0:
             self.regs[rd] = write_data
@@ -463,11 +476,10 @@ class RV32Interpreter:
         self.last_was_load = is_current_load
         self.last_load_rd = rd if is_current_load else 0
 
-        # Snapshot for MEM stage visibility of next instruction
-        self.mem_vis_cla_switching = self.cla_switching
-        self.mem_vis_mul_thermal = self.mul_thermal
-        self.mem_vis_retired_count = self.retired_count
-        self.mem_vis_last_commit_pc = self.last_commit_pc
+        cla_before = self.cla_switching
+        mul_before = self.mul_thermal
+        ret_before = self.retired_count
+        last_pc_before = self.last_commit_pc
 
         # Update telemetry on architectural retirement
         if telem_valid:
@@ -480,6 +492,22 @@ class RV32Interpreter:
 
         self.retired_count += 1
         self.last_commit_pc = current_pc
+
+        # Snapshot for MEM stage visibility of next instruction:
+        # If the pipeline flushes (taken branch, jumps),
+        # this instruction commits in WB before the target/next instruction reaches MEM.
+        # In straight-line back-to-back flow, the next instruction in MEM sees the state before this retirement.
+        is_flush_or_long_stall = (opcode == 0x63 and take) or (opcode in (0x6F, 0x67))
+        if is_flush_or_long_stall:
+            self.mem_vis_cla_switching = self.cla_switching
+            self.mem_vis_mul_thermal = self.mul_thermal
+            self.mem_vis_retired_count = self.retired_count
+            self.mem_vis_last_commit_pc = self.last_commit_pc
+        else:
+            self.mem_vis_cla_switching = cla_before
+            self.mem_vis_mul_thermal = mul_before
+            self.mem_vis_retired_count = ret_before
+            self.mem_vis_last_commit_pc = last_pc_before
 
         event = CommitEvent(
             pc=current_pc,

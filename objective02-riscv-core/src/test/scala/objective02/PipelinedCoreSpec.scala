@@ -593,6 +593,151 @@ class PipelinedCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Matc
       retiredPcs shouldBe expectedPcs
       dut.io.processBehaviorClass.peek().litValue shouldBe 42
       dut.io.schedHint.peek().litValue shouldBe 3
+
+      // Direct Chisel-level verification of returned register values
+      retiredVals(4)  shouldBe 42 // x3 = readback PROCESS_BEHAVIOR_CLASS
+      retiredVals(7)  shouldBe 3  // x4 = readback SCHED_HINT
+      retiredVals(17) shouldBe 16 // x14 = RETIRED_COUNT snapshot
+      retiredVals(18) shouldBe 0  // x15 = BRANCH_TAKEN_COUNT
+      retiredVals(19) shouldBe 1  // x16 = LOAD_USE_STALL_COUNT
+      retiredVals(20) shouldBe 33 // x17 = DIV_BUSY_CYCLES
+      retiredVals(21) shouldBe 34 // x18 = PIPELINE_STALL_COUNT
+      retiredVals(22) shouldBe 49 // x19 = CLA_SWITCHING
+      retiredVals(23) shouldBe 5  // x21 = MUL_THERMAL
+      retiredVals(24) shouldBe 59 // x22 = EDP_CURRENT
+      retiredVals(25) shouldBe 1  // x23 = EDP_CONFIG
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Test 15: Store to Read-Only MMIO Register (Effective vs Request Semantics)
+  // -------------------------------------------------------------
+  it should "assert memWriteReq but suppress memWrite when software stores to read-only MMIO register" in {
+    val progStoreRO = Seq(
+      BigInt("80002537", 16), // 0x00: lui x10, 0x80002
+      BigInt("3e700293", 16), // 0x04: addi x5, x0, 999
+      BigInt("00552623", 16)  // 0x08: sw x5, 12(x10) (attempt store to RETIRED_COUNT @ 0x8000200C)
+    )
+
+    test(new PipelinedCore(initialProgram = progStoreRO)) { dut =>
+      var storeCommitSeen = false
+      for (_ <- 0 until 12) {
+        if (dut.io.commit.valid.peek().litToBoolean && dut.io.commit.pc.peek().litValue == 0x08) {
+          dut.io.commit.memWriteReq.expect(true.B)
+          dut.io.commit.memWrite.expect(false.B) // Store rejected!
+          dut.io.commit.illegal.expect(false.B)
+          storeCommitSeen = true
+        }
+        dut.clock.step(1)
+      }
+      assert(storeCommitSeen, "Store commit event at PC 0x08 must be observed")
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Test 16: Load from Unmapped MMIO Address (Suppression & Non-Fallthrough)
+  // -------------------------------------------------------------
+  it should "assert memReadReq but suppress memRead and regWrite when loading from unmapped MMIO address" in {
+    val progUnmappedMMIO = Seq(
+      BigInt("80003537", 16), // 0x00: lui x10, 0x80003
+      BigInt("00052303", 16)  // 0x04: lw x6, 0(x10) (unmapped 0x80003000)
+    )
+
+    test(new PipelinedCore(initialProgram = progUnmappedMMIO)) { dut =>
+      var loadCommitSeen = false
+      for (_ <- 0 until 10) {
+        if (dut.io.commit.valid.peek().litToBoolean && dut.io.commit.pc.peek().litValue == 0x04) {
+          dut.io.commit.memReadReq.expect(true.B)
+          dut.io.commit.memRead.expect(false.B)     // Read unaccepted!
+          dut.io.commit.regWrite.expect(false.B)    // Destination register writeback suppressed!
+          dut.io.commit.illegal.expect(false.B)
+          loadCommitSeen = true
+        }
+        dut.clock.step(1)
+      }
+      assert(loadCommitSeen, "Load commit event at PC 0x04 must be observed")
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Test 17: Illegal Instructions & OP_SECURITY Placeholder do NOT Mutate Telemetry
+  // -------------------------------------------------------------
+  it should "guarantee that illegal instructions and OP_SECURITY placeholder do not mutate telemetry" in {
+    val progIllegalTelem = Seq(
+      BigInt("80001537", 16), // 0x00: lui x10, 0x80001
+      BigInt("00a00093", 16), // 0x04: addi x1, x0, 10
+      BigInt("00452583", 16), // 0x08: lw x11, 4(x10)
+      BigInt("00452683", 16), // 0x0C: lw x13, 4(x10)
+      BigInt("00452783", 16), // 0x10: lw x15, 4(x10) (reads baseline CLA_SWITCHING = 7)
+      BigInt("00000000", 16), // 0x14: illegal instruction (all 0s)
+      BigInt("0000000b", 16), // 0x18: OP_SECURITY placeholder
+      BigInt("00452603", 16), // 0x1C: lw x12, 4(x10) (reads CLA_SWITCHING = 7)
+      BigInt("00452703", 16)  // 0x20: lw x14, 4(x10) (reads CLA_SWITCHING = 7)
+    )
+
+    test(new PipelinedCore(initialProgram = progIllegalTelem)) { dut =>
+      val retiredVals = scala.collection.mutable.Map[BigInt, BigInt]()
+      for (_ <- 0 until 30) {
+        if (dut.io.commit.valid.peek().litToBoolean) {
+          val pc = dut.io.commit.pc.peek().litValue
+          val wdata = dut.io.commit.writeData.peek().litValue
+          retiredVals(pc) = wdata
+        }
+        dut.clock.step(1)
+      }
+
+      val claBaseline = retiredVals(0x10)
+      val claAfterIllegalAndSec = retiredVals(0x1C)
+      val claFinal = retiredVals(0x20)
+
+      claBaseline shouldBe 7
+      claAfterIllegalAndSec shouldBe 7
+      claFinal shouldBe 7
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Test 18: Branch Execution Telemetry & Differential Trace Export
+  // -------------------------------------------------------------
+  it should "correctly accumulate CLA switching activity across branch operations and export trace" in {
+    val progBranchMMIO = Seq(
+      BigInt("80001537", 16), // 0x00: lui x10, 0x80001
+      BigInt("00f00093", 16), // 0x04: addi x1, x0, 15
+      BigInt("00f00113", 16), // 0x08: addi x2, x0, 15
+      BigInt("00208663", 16), // 0x0C: beq x1, x2, 12 (taken branch: SUB in ALU -> CLA active!)
+      BigInt("3e700193", 16), // 0x10: addi x3, x0, 999 (killed)
+      BigInt("00000013", 16), // 0x14: nop (killed)
+      BigInt("00452203", 16)  // 0x18: lw x4, 4(x10) (read CLA_SWITCHING into x4)
+    )
+
+    test(new PipelinedCore(initialProgram = progBranchMMIO)) { dut =>
+      val expectedPcs = Seq(BigInt(0x00), BigInt(0x04), BigInt(0x08), BigInt(0x0C), BigInt(0x18))
+      val retiredPcs = scala.collection.mutable.ArrayBuffer[BigInt]()
+      val retiredVals = scala.collection.mutable.ArrayBuffer[BigInt]()
+      val trace = scala.collection.mutable.ArrayBuffer[String]()
+
+      var cycles = 0
+      while (retiredPcs.length < expectedPcs.length && cycles < 100) {
+        val ret = captureRetirementEvent(dut)
+        if (ret.isDefined) {
+          retiredPcs += dut.io.commit.pc.peek().litValue
+          retiredVals += dut.io.commit.writeData.peek().litValue
+          trace += ret.get
+        }
+        dut.clock.step(1)
+        cycles += 1
+      }
+      val finalRet = captureRetirementEvent(dut)
+      if (finalRet.isDefined) {
+        retiredPcs += dut.io.commit.pc.peek().litValue
+        retiredVals += dut.io.commit.writeData.peek().litValue
+        trace += finalRet.get
+      }
+      recordPipelineTrace("progBranchMMIO", trace)
+
+      retiredPcs shouldBe expectedPcs
+      // x4 readback at index 4 should be 8 (4 from addi x1 + 4 from beq SUB)
+      retiredVals.last shouldBe 8
     }
   }
 }
