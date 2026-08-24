@@ -272,64 +272,105 @@ class Decoder(val enableFullM: Boolean = false, val enableCapabilities: Boolean 
         val cs1Valid = (cs1Index <= 7.U)
         val cdValid  = (cdIndex <= 7.U)
 
-        when(f7 === 0.U && cs1Valid) {
-          ctrl.isCapOp    := true.B
-          ctrl.usesCapRs1 := true.B
+        ctrl.isCapOp := true.B
 
-          switch(f3) {
-            is(FUNCT3_CSETBOUNDS) {
-              when(cdValid) {
-                ctrl.capOp       := CapOp.CSETBOUNDS
-                ctrl.capRegWrite := true.B
-                ctrl.usesIntRs2  := true.B // rs2 length in integer GPR
-              }.otherwise {
-                ctrl.illegalInstruction := true.B
-              }
-            }
-            is(FUNCT3_CANDPERM) {
-              when(cdValid) {
-                ctrl.capOp       := CapOp.CANDPERM
-                ctrl.capRegWrite := true.B
-                ctrl.usesIntRs2  := true.B // rs2 mask in integer GPR
-              }.otherwise {
-                ctrl.illegalInstruction := true.B
-              }
-            }
-            is(FUNCT3_CINCOFFSET) {
-              when(cdValid) {
-                ctrl.capOp       := CapOp.CINCOFFSET
-                ctrl.capRegWrite := true.B
-                ctrl.usesIntRs2  := true.B // rs2 signed delta in integer GPR
-              }.otherwise {
-                ctrl.illegalInstruction := true.B
-              }
-            }
-            is(FUNCT3_CGETBASE) {
-              ctrl.capOp    := CapOp.CGETBASE
-              ctrl.regWrite := true.B
-              ctrl.wbSource := WBSource.ALU
-            }
-            is(FUNCT3_CGETLEN) {
-              ctrl.capOp    := CapOp.CGETLEN
-              ctrl.regWrite := true.B
-              ctrl.wbSource := WBSource.ALU
-            }
-            is(FUNCT3_CGETTAG) {
-              ctrl.capOp    := CapOp.CGETTAG
-              ctrl.regWrite := true.B
-              ctrl.wbSource := WBSource.ALU
-            }
-            is(FUNCT3_CGETPERM) {
-              ctrl.capOp    := CapOp.CGETPERM
-              ctrl.regWrite := true.B
-              ctrl.wbSource := WBSource.ALU
-            }
-            is(7.U) {
+        switch(f3) {
+          is(FUNCT3_CSETBOUNDS) {
+            when(f7 === 0.U && cs1Valid && cdValid) {
+              ctrl.capOp       := CapOp.CSETBOUNDS
+              ctrl.capRegWrite := true.B
+              ctrl.usesCapRs1  := true.B
+              ctrl.usesIntRs2  := true.B // rs2 length in integer GPR
+            }.otherwise {
               ctrl.illegalInstruction := true.B
             }
           }
-        }.otherwise {
-          ctrl.illegalInstruction := true.B
+          is(FUNCT3_CANDPERM) {
+            when(f7 === 0.U && cs1Valid && cdValid) {
+              ctrl.capOp       := CapOp.CANDPERM
+              ctrl.capRegWrite := true.B
+              ctrl.usesCapRs1  := true.B
+              ctrl.usesIntRs2  := true.B // rs2 mask in integer GPR
+            }.otherwise {
+              ctrl.illegalInstruction := true.B
+            }
+          }
+          is(FUNCT3_CINCOFFSET) {
+            when(f7 === 0.U && cs1Valid && cdValid) {
+              ctrl.capOp       := CapOp.CINCOFFSET
+              ctrl.capRegWrite := true.B
+              ctrl.usesCapRs1  := true.B
+              ctrl.usesIntRs2  := true.B // rs2 signed delta in integer GPR
+            }.otherwise {
+              ctrl.illegalInstruction := true.B
+            }
+          }
+          is(FUNCT3_CGETBASE) {
+            when(f7 === 0.U && cs1Valid) {
+              ctrl.capOp      := CapOp.CGETBASE
+              ctrl.regWrite   := true.B
+              ctrl.usesCapRs1 := true.B
+              ctrl.wbSource   := WBSource.ALU
+            }.otherwise {
+              ctrl.illegalInstruction := true.B
+            }
+          }
+          is(FUNCT3_CGETLEN) {
+            when(f7 === 0.U && cs1Valid) {
+              ctrl.capOp      := CapOp.CGETLEN
+              ctrl.regWrite   := true.B
+              ctrl.usesCapRs1 := true.B
+              ctrl.wbSource   := WBSource.ALU
+            }.otherwise {
+              ctrl.illegalInstruction := true.B
+            }
+          }
+          is(FUNCT3_CGETTAG) {
+            when(f7 === 0.U && cs1Valid) {
+              ctrl.capOp      := CapOp.CGETTAG
+              ctrl.regWrite   := true.B
+              ctrl.usesCapRs1 := true.B
+              ctrl.wbSource   := WBSource.ALU
+            }.otherwise {
+              ctrl.illegalInstruction := true.B
+            }
+          }
+          is(FUNCT3_CGETPERM) {
+            when(f7 === 0.U && cs1Valid) {
+              ctrl.capOp      := CapOp.CGETPERM
+              ctrl.regWrite   := true.B
+              ctrl.usesCapRs1 := true.B
+              ctrl.wbSource   := WBSource.ALU
+            }.otherwise {
+              ctrl.illegalInstruction := true.B
+            }
+          }
+          is(FUNCT3_CEXT) {
+            switch(f7) {
+              is(FUNCT7_CGETOFFSET) {
+                when(cs1Valid) {
+                  ctrl.capOp      := CapOp.CGETOFFSET
+                  ctrl.regWrite   := true.B
+                  ctrl.usesCapRs1 := true.B
+                  ctrl.wbSource   := WBSource.ALU
+                }.otherwise {
+                  ctrl.illegalInstruction := true.B
+                }
+              }
+              is(FUNCT7_CCLEAR) {
+                when(cdValid) {
+                  ctrl.capOp       := CapOp.CCLEAR
+                  ctrl.capRegWrite := true.B
+                  ctrl.usesCapRs1  := false.B
+                }.otherwise {
+                  ctrl.illegalInstruction := true.B
+                }
+              }
+            }
+            when(f7 =/= FUNCT7_CGETOFFSET && f7 =/= FUNCT7_CCLEAR) {
+              ctrl.illegalInstruction := true.B
+            }
+          }
         }
       }.otherwise {
         // When capabilities are disabled, maintain safe placeholder semantics

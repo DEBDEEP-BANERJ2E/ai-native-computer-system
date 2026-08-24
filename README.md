@@ -18,14 +18,15 @@ The repository currently implements and verifies two foundational hardware layer
 2. **Objective 2: RISC-V Processor Core, System MMIO & CapabilityLite Security** (`objective02-riscv-core/`):
    - **SingleCycleCore**: Canonical baseline RV32I/M execution core.
    - **PipelinedCore**: 5-stage hazard-forwarding pipelined processor (IF, ID, EX, MEM, WB) with single-cycle EX/MEM and MEM/WB bypass paths, Load-Use stall detection, and Branch/JALR early evaluation.
-   - **RV32M Full Multi-Cycle Extension**: Hardware multiplier and multi-cycle non-restoring iterative divider (`DIV`, `DIVU`, `REM`, `REMU`, `MUL`, `MULH`, `MULHSU`, `MULHU`).
+   - **RV32M Full Multi-Cycle Extension**: Hardware multiplier and multi-cycle non-restoring iterative divider (`DIV`, `DIVU`, `REM`, `REMU`, `MUL`, `MULH`, `MULHSU`, `MULHU`) with immediate kill port on traps.
    - **Hardware Telemetry & Cross-Layer System MMIO**: Telemetry block integration driven by retirement in WB, performance counters (`RETIRED_COUNT`, `BRANCH_TAKEN_COUNT`, `LOAD_USE_STALL_COUNT`, `DIV_BUSY_CYCLES`, `PIPELINE_STALL_COUNT`), and OS context classification registers (`CURRENT_CONTEXT`, `PROCESS_BEHAVIOR_CLASS`, `SCHED_HINT`).
-   - **CapabilityLite Hardware Security (Phase 7)**:
-     - 101-bit bounded capability registers `c0`–`c7` (`tag`, `base`, `length`, `perms`, `offset`) with hardware root initialization (`c1` = DataMemory, `c2` = SystemMMIO, `c0` = NULL).
-     - Custom-0 (`0x0B`) capability manipulation instructions (`CSETBOUNDS`, `CANDPERMS`, `CINCOFFSET`, `CGETTAG`, `CGETBASE`, `CGETLEN`, `CGETOFFSET`, `CGETPERMS`).
+   - **CapabilityLite Hardware Security & Precise Trapping (Phase 8 - Frozen)**:
+     - 101-bit bounded capability registers `c0`–`c7` (`tag`, `base`, `length`, `perms`, `offset`) with hardware-immutable root initialization (`c0` = NULL, `c1` = DataMemory, `c2` = SystemMMIO; write attempts discarded) and general-purpose process registers `c3`–`c7`.
+     - Custom-0 (`0x0B`) capability manipulation instructions (`CSETBOUNDS`, `CANDPERM`, `CINCOFFSET`, `CGETTAG`, `CGETBASE`, `CGETLEN`, `CGETOFFSET`, `CGETPERM`, `CCLEAR`).
      - Custom-1 (`0x2B`) capability-protected memory instructions (`CLW`, `CLH`, `CLHU`, `CLB`, `CLBU`, `CSW`, `CSH`, `CSB`).
-     - Pipeline Capability Checker in MEM stage enforcing Tag, Bounds, and Permission checks with atomic suppression and MMIO sticky security violation logging (`SEC_STATUS`, `SEC_PC`, `SEC_ADDR`, `SEC_INFO`, `SEC_CONTEXT`).
-   - **Verification**: 94 Chisel unit/integration tests and 17-benchmark cross-model differential verification suite (209 retirement events matched bit-exact across Python reference, SingleCycleCore, and PipelinedCore).
+     - Pipeline Capability Checker in MEM stage enforcing Tag, Bounds, and Permission checks with atomic suppression and MMIO sticky security audit logging (`SEC_STATUS`, `SEC_PC`, `SEC_ADDR`, `SEC_INFO`, `SEC_CONTEXT`).
+     - Dedicated Architectural Precise Trap Engine (`0x80002114`–`0x80002130`): Combinational MEM-stage trap redirect (`takePreciseTrap`), architectural writeback suppression, pipeline flush (IF/ID/EX) and divider abort (`io.kill`), synchronous metadata capture (`TRAP_ACTIVE`, `TRAP_EPC`, `TRAP_CAUSE`, `TRAP_ADDR`, `TRAP_CONTEXT`), double-fault detection with set-over-W1C priority, and normal `TRAP_RETURN` retirement and jump.
+   - **Verification & Parity**: 108 Chisel unit/integration tests across 16 test suites (100% green) and 6-Section cross-model differential verification suite (18 benchmark suites, 223 retirement events matched bit-exact across Python reference emulator, SingleCycleCore, and PipelinedCore). Full SystemVerilog RTL generation verified via `GenerateRTL`.
 
 The Python AgentOS policy kernel in `objective10-agentos/agentos/` is an exploratory slice for Objective 10 and remains decoupled from the core hardware pipelines.
 

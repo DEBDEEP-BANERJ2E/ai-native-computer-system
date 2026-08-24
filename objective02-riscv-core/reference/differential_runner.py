@@ -227,6 +227,8 @@ def cgetbase(rd, cs1):        return encode_r(0x00, 0, cs1, 0x3, rd, 0x0B)
 def cgetlen(rd, cs1):         return encode_r(0x00, 0, cs1, 0x4, rd, 0x0B)
 def cgettag(rd, cs1):         return encode_r(0x00, 0, cs1, 0x5, rd, 0x0B)
 def cgetperm(rd, cs1):        return encode_r(0x00, 0, cs1, 0x6, rd, 0x0B)
+def cgetoffset(rd, cs1):      return encode_r(0x00, 0, cs1, 0x7, rd, 0x0B)
+def cclear(cd):               return encode_r(0x01, 0, 0, 0x7, cd, 0x0B)
 
 def clb(rd, cs1, offset): return encode_i(offset, cs1, 0x0, rd, 0x2B)
 def clh(rd, cs1, offset): return encode_i(offset, cs1, 0x1, rd, 0x2B)
@@ -239,6 +241,33 @@ def addi(rd, rs1, imm): return encode_i(imm, rs1, 0x0, rd, 0x13)
 def lui(rd, imm20):     return encode_u(imm20, rd, 0x37)
 def lw(rd, rs1, offset): return encode_i(offset, rs1, 0x2, rd, 0x03)
 def sw(rs2, rs1, offset): return encode_s(offset, rs2, rs1, 0x2, 0x23)
+
+PHASE8_BENCHMARKS = {
+    "phase8_progA": {
+        "name": "Phase 8 Program A: Precise OOB Store Trap & Redirection",
+        "code": [
+            lui(10, 0x80002),
+            addi(5, 0, 0x80),
+            sw(5, 10, 0x11C),
+            addi(5, 0, 1),
+            sw(5, 10, 0x114),
+            addi(5, 0, 0x200),
+            cincoffset(3, 1, 5),
+            addi(6, 0, 16),
+            csetbounds(3, 3, 6),
+            addi(7, 0, 0x77),
+            csw(7, 3, 20),
+            addi(14, 0, 999),
+        ] + [addi(0, 0, 0)] * 20 + [
+            lw(11, 10, 0x118),
+            lw(12, 10, 0x120),
+            lw(13, 10, 0x124),
+            lw(15, 10, 0x128),
+        ],
+        "cycles": 15,
+        "pipe_trace": "test_traces/phase8_progA_precise_trap.json"
+    }
+}
 
 CAPABILITY_BENCHMARKS = {
     "progA": {
@@ -618,12 +647,43 @@ def run_differential_comparison(use_existing_traces: bool = False):
         passed_cap_programs += 1
 
     print("\n" + "=" * 80)
+    print("SECTION 6: 2-WAY DIFFERENTIAL VERIFICATION ON PHASE 8 PRECISE TRAPS")
+    print("           (PYTHON REFERENCE <==> PIPELINED CORE)")
+    print("=" * 80)
+
+    total_trap_events = 0
+    passed_trap_programs = 0
+
+    for prog_key, prog_info in PHASE8_BENCHMARKS.items():
+        print(f"\nVerifying 2-Way Parity on {prog_info['name']}...")
+        with open(prog_info["pipe_trace"], "r") as f:
+            pipe_events = json.load(f)
+
+        interp = RV32Interpreter()
+        interp.load_program(prog_info["code"])
+        py_trace = interp.run(prog_info["cycles"])
+
+        assert len(py_trace) == len(pipe_events), (
+            f"Python ({len(py_trace)}) vs PipelinedCore ({len(pipe_events)}) retirement count mismatch"
+        )
+
+        for i in range(len(py_trace)):
+            total_trap_events += 1
+            py_ev = py_trace[i]
+            pipe_ev = pipe_events[i]
+            compare_event("Python", py_ev, "PipelinedCore", pipe_ev, i)
+
+        print(f"  [PASS] All {len(py_trace)} retirement events matched 1:1 across Python and PipelinedCore!")
+        passed_trap_programs += 1
+
+    print("\n" + "=" * 80)
     print("DIFFERENTIAL VERIFICATION SUMMARY:")
     print(f"  1. Original 5 Benchmarks (3-Way Bit-Exact Parity): {passed_orig_programs}/{len(ORIGINAL_BENCHMARKS)} Programs ({total_orig_events} events bit-exact across Python, SingleCycleCore, and PipelinedCore)")
     print(f"  2. RV32M Benchmarks      (2-Way Bit-Exact Parity): {passed_rv32m_programs}/{len(RV32M_BENCHMARKS)} Programs ({total_rv32m_events} events bit-exact across Python and PipelinedCore)")
     print(f"  3. Canonical Benchmarks  (3-Way Bit-Exact Parity): {passed_canon_programs}/{len(PIPELINE_3WAY_PROGRAMS)} Programs ({total_canon_events} events bit-exact across Python, SingleCycleCore, and PipelinedCore)")
     print(f"  4. System MMIO Benchmarks(2-Way Bit-Exact Parity): {passed_mmio_programs}/{len(MMIO_BENCHMARKS)} Programs ({total_mmio_events} events bit-exact across Python and PipelinedCore)")
     print(f"  5. CapabilityLite Benchmarks (2-Way Parity):       {passed_cap_programs}/{len(CAPABILITY_BENCHMARKS)} Programs ({total_cap_events} events bit-exact across Python and PipelinedCore)")
+    print(f"  6. Precise Trap Benchmarks   (2-Way Parity):       {passed_trap_programs}/{len(PHASE8_BENCHMARKS)} Programs ({total_trap_events} events bit-exact across Python and PipelinedCore)")
     print("=" * 80)
 
 if __name__ == "__main__":

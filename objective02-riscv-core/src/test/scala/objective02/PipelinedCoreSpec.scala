@@ -775,6 +775,8 @@ class PipelinedCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Matc
   def cgetlen(rd: Int, cs1: Int): BigInt              = encodeR(0x00, 0, cs1, 0x4, rd, 0x0B)
   def cgettag(rd: Int, cs1: Int): BigInt              = encodeR(0x00, 0, cs1, 0x5, rd, 0x0B)
   def cgetperm(rd: Int, cs1: Int): BigInt             = encodeR(0x00, 0, cs1, 0x6, rd, 0x0B)
+  def cgetoffset(rd: Int, cs1: Int): BigInt           = encodeR(0x00, 0, cs1, 0x7, rd, 0x0B)
+  def cclear(cd: Int): BigInt                         = encodeR(0x01, 0, 0, 0x7, cd, 0x0B)
 
   // Capability memory: OP_CAP_MEM = 0x2B
   def clb(rd: Int, cs1: Int, offset: Int): BigInt = encodeI(offset, cs1, 0x0, rd, 0x2B)
@@ -789,6 +791,29 @@ class PipelinedCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Matc
   def lui(rd: Int, imm20: Int): BigInt          = encodeU(imm20, rd, 0x37)
   def lw(rd: Int, rs1: Int, offset: Int): BigInt = encodeI(offset, rs1, 0x2, rd, 0x03)
   def sw(rs2: Int, rs1: Int, offset: Int): BigInt = encodeS(offset, rs2, rs1, 0x2, 0x23)
+  def div(rd: Int, rs1: Int, rs2: Int): BigInt   = encodeR(0x01, rs2, rs1, 0x4, rd, 0x33)
+  def beq(rs1: Int, rs2: Int, imm: Int): BigInt = {
+    val imm13 = imm & 0x1FFF
+    val bit12 = (imm13 >> 12) & 1
+    val bit10_5 = (imm13 >> 5) & 0x3F
+    val bit4_1 = (imm13 >> 1) & 0xF
+    val bit11 = (imm13 >> 11) & 1
+    val immFormatted = (bit12 << 11) | (bit11 << 10) | (bit10_5 << 4) | bit4_1
+    val imm11_5 = (immFormatted >> 5) & 0x7F
+    val imm4_0 = immFormatted & 0x1F
+    val word = (BigInt(imm11_5) << 25) | (BigInt(rs2 & 0x1F) << 20) | (BigInt(rs1 & 0x1F) << 15) | (BigInt(0) << 12) | (BigInt(imm4_0) << 7) | BigInt(0x63)
+    word & BigInt("FFFFFFFF", 16)
+  }
+  def jal(rd: Int, imm: Int): BigInt = {
+    val imm21 = imm & 0x1FFFFF
+    val bit20 = (imm21 >> 20) & 1
+    val bit10_1 = (imm21 >> 1) & 0x3FF
+    val bit11 = (imm21 >> 11) & 1
+    val bit19_12 = (imm21 >> 12) & 0xFF
+    val immFormatted = (bit20 << 19) | (bit19_12 << 11) | (bit11 << 10) | bit10_1
+    val word = (BigInt(immFormatted) << 12) | (BigInt(rd & 0x1F) << 7) | BigInt(0x6F)
+    word & BigInt("FFFFFFFF", 16)
+  }
 
   // -------------------------------------------------------------
   // Test 19: Program A - Buffer Overflow Containment & Bounds Enforcement
@@ -1163,5 +1188,465 @@ class PipelinedCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Matc
       retiredVals(14) shouldBe 0    // x18 = c7.tag (offset > length overflow failure, c7 remains NULL)
     }
   }
+
+  // =============================================================
+  // Phase 8: Precise Security Traps, Handler Redirection & Context Switching (Tests 27 - 37)
+  // =============================================================
+
+  // -------------------------------------------------------------
+  // Test 27: Program A - Precise OOB Store Trap & Redirection
+  // -------------------------------------------------------------
+  it should "execute Phase 8 Program A: trigger precise trap on out-of-bounds CSW, redirect to TRAP_VECTOR, and capture exact trap metadata" in {
+    // Layout: Main code @ 0x00..0x30, Handler code @ 0x80 (word 32)
+    val mainCode = Seq(
+      lui(10, 0x80002),        // 0x00: lui x10, 0x80002 (MMIO base)
+      addi(5, 0, 0x80),        // 0x04: addi x5, x0, 0x80
+      sw(5, 10, 0x11C),        // 0x08: sw x5, 0x11C(x10) (TRAP_VECTOR := 0x80)
+      addi(5, 0, 1),           // 0x0C: addi x5, x0, 1
+      sw(5, 10, 0x114),        // 0x10: sw x5, 0x114(x10) (TRAP_CONTROL := 1 [enable])
+      addi(5, 0, 0x200),       // 0x14: addi x5, x0, 0x200
+      cincoffset(3, 1, 5),     // 0x18: cincoffset c3, c1, x5 (c3 cursor = 0x200)
+      addi(6, 0, 16),          // 0x1C: addi x6, x0, 16
+      csetbounds(3, 3, 6),     // 0x20: csetbounds c3, c3, x6 (c3: base 0x200, len 16, RW)
+      addi(7, 0, 0x77),        // 0x24: addi x7, x0, 0x77
+      csw(7, 3, 20),           // 0x28: csw x7, 20(c3) (DENIED: BOUNDS! PC=0x28 -> FAULT!)
+      addi(14, 0, 999)         // 0x2C: addi x14, x0, 999 (killed by trap flush)
+    )
+    val nops1 = Seq.fill(32 - mainCode.length)(addi(0, 0, 0))
+    val handlerCode = Seq(
+      lw(11, 10, 0x118),       // 0x80: lw x11, 0x118(x10) (read TRAP_STATUS -> 1 [ACTIVE])
+      lw(12, 10, 0x120),       // 0x84: lw x12, 0x120(x10) (read TRAP_EPC -> 0x28)
+      lw(13, 10, 0x124),       // 0x88: lw x13, 0x124(x10) (read TRAP_CAUSE -> (1 << 4) | 2 = 0x12)
+      lw(15, 10, 0x128)        // 0x8C: lw x15, 0x128(x10) (read TRAP_ADDR -> 0x214)
+    )
+    val progP8A = mainCode ++ nops1 ++ handlerCode
+
+    test(new PipelinedCore(initialProgram = progP8A)) { dut =>
+      val retiredVals = scala.collection.mutable.ArrayBuffer[BigInt]()
+      val trace = scala.collection.mutable.ArrayBuffer[String]()
+      for (_ <- 0 until 60) {
+        val ret = captureRetirementEvent(dut)
+        if (ret.isDefined) {
+          retiredVals += dut.io.commit.writeData.peek().litValue
+          trace += ret.get
+        }
+        dut.clock.step(1)
+      }
+      recordPipelineTrace("phase8_progA_precise_trap", trace)
+
+      dut.io.trap.trapActive.peek().litToBoolean shouldBe true
+      dut.io.trap.trapEpc.peek().litValue shouldBe 0x28
+      dut.io.trap.trapCause.peek().litValue shouldBe ((1 << 4) | 2)
+      dut.io.trap.trapAddr.peek().litValue shouldBe 0x214
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Test 28: Program B - Read-Only Permission Trap
+  // -------------------------------------------------------------
+  it should "execute Phase 8 Program B: trigger precise trap on permission violation and record WRITE_PERMISSION cause" in {
+    val mainCode = Seq(
+      lui(10, 0x80002),        // 0x00: lui x10, 0x80002
+      addi(5, 0, 0x80),        // 0x04: addi x5, x0, 0x80
+      sw(5, 10, 0x11C),        // 0x08: sw x5, 0x11C(x10) (TRAP_VECTOR := 0x80)
+      addi(5, 0, 1),           // 0x0C: addi x5, x0, 1
+      sw(5, 10, 0x114),        // 0x10: sw x5, 0x114(x10) (TRAP_CONTROL := 1)
+      addi(5, 0, 1),           // 0x14: addi x5, x0, 1 (READ permission mask)
+      candperm(3, 1, 5),       // 0x18: candperm c3, c1, x5 (c3 becomes Read-Only)
+      addi(7, 0, 99),          // 0x1C: addi x7, x0, 99
+      csw(7, 3, 0),            // 0x20: csw x7, 0(c3) (DENIED: WRITE_PERMISSION! PC=0x20 -> FAULT!)
+      addi(14, 0, 999)         // 0x24: addi x14, x0, 999 (killed)
+    )
+    val nops = Seq.fill(32 - mainCode.length)(addi(0, 0, 0))
+    val handlerCode = Seq(
+      lw(11, 10, 0x118),       // 0x80: read TRAP_STATUS
+      lw(12, 10, 0x120),       // 0x84: read TRAP_EPC
+      lw(13, 10, 0x124)        // 0x88: read TRAP_CAUSE
+    )
+    val progP8B = mainCode ++ nops ++ handlerCode
+
+    test(new PipelinedCore(initialProgram = progP8B)) { dut =>
+      for (_ <- 0 until 50) dut.clock.step(1)
+      dut.io.trap.trapActive.peek().litToBoolean shouldBe true
+      dut.io.trap.trapEpc.peek().litValue shouldBe 0x20
+      dut.io.trap.trapCause.peek().litValue shouldBe ((1 << 4) | 4) // WRITE | WRITE_PERMISSION (4)
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Test 29: Program C - NULL Capability Trap
+  // -------------------------------------------------------------
+  it should "execute Phase 8 Program C: trigger precise trap on NULL capability access" in {
+    val mainCode = Seq(
+      lui(10, 0x80002),        // 0x00: lui x10, 0x80002
+      addi(5, 0, 0x80),        // 0x04: addi x5, x0, 0x80
+      sw(5, 10, 0x11C),        // 0x08: sw x5, 0x11C(x10) (TRAP_VECTOR := 0x80)
+      addi(5, 0, 1),           // 0x0C: addi x5, x0, 1
+      sw(5, 10, 0x114),        // 0x10: sw x5, 0x114(x10) (TRAP_CONTROL := 1)
+      addi(7, 0, 0x55),        // 0x14: addi x7, x0, 0x55
+      csw(7, 0, 0),            // 0x18: csw x7, 0(c0) (DENIED: INVALID_CAPABILITY! PC=0x18 -> FAULT!)
+      addi(14, 0, 999)         // 0x1C: killed
+    )
+    val nops = Seq.fill(32 - mainCode.length)(addi(0, 0, 0))
+    val handlerCode = Seq(
+      lw(11, 10, 0x118),       // 0x80: read TRAP_STATUS
+      lw(12, 10, 0x120),       // 0x84: read TRAP_EPC
+      lw(13, 10, 0x124)        // 0x88: read TRAP_CAUSE
+    )
+    val progP8C = mainCode ++ nops ++ handlerCode
+
+    test(new PipelinedCore(initialProgram = progP8C)) { dut =>
+      for (_ <- 0 until 50) dut.clock.step(1)
+      dut.io.trap.trapActive.peek().litToBoolean shouldBe true
+      dut.io.trap.trapEpc.peek().litValue shouldBe 0x18
+      dut.io.trap.trapCause.peek().litValue shouldBe ((1 << 4) | 1) // WRITE | INVALID_CAPABILITY (1)
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Test 30: Program D - Precise Age-Ordered Pipeline Invariance
+  // -------------------------------------------------------------
+  it should "execute Phase 8 Program D: commit older instruction, suppress faulting MEM instruction, and flush younger ID/EX stages" in {
+    val mainCode = Seq(
+      lui(10, 0x80002),        // 0x00: lui x10, 0x80002
+      addi(5, 0, 0x80),        // 0x04: addi x5, x0, 0x80
+      sw(5, 10, 0x11C),        // 0x08: sw x5, 0x11C(x10) (TRAP_VECTOR := 0x80)
+      addi(5, 0, 1),           // 0x0C: addi x5, x0, 1
+      sw(5, 10, 0x114),        // 0x10: sw x5, 0x114(x10) (TRAP_CONTROL := 1)
+      addi(1, 0, 10),          // 0x14: addi x1, x0, 10 (older instruction: MUST commit!)
+      csw(1, 0, 0),            // 0x18: csw x1, 0(c0) (faulting MEM instruction: MUST NOT commit!)
+      addi(2, 0, 20),          // 0x1C: addi x2, x0, 20 (in EX: MUST be flushed!)
+      addi(3, 0, 30)           // 0x20: addi x3, x0, 30 (in ID: MUST be flushed!)
+    )
+    val nops = Seq.fill(32 - mainCode.length)(addi(0, 0, 0))
+    val handlerCode = Seq(
+      addi(4, 0, 40)           // 0x80: addi x4, x0, 40 (handler instruction: MUST commit!)
+    )
+    val progP8D = mainCode ++ nops ++ handlerCode
+
+    test(new PipelinedCore(initialProgram = progP8D)) { dut =>
+      val committedPcs = scala.collection.mutable.ArrayBuffer[BigInt]()
+      for (_ <- 0 until 50) {
+        if (dut.io.commit.valid.peek().litToBoolean) {
+          committedPcs += dut.io.commit.pc.peek().litValue
+        }
+        dut.clock.step(1)
+      }
+      committedPcs should contain (BigInt(0x14))     // Older addi x1 committed
+      committedPcs should not contain (BigInt(0x18)) // Faulting csw NOT committed
+      committedPcs should not contain (BigInt(0x1C)) // Younger addi x2 NOT committed
+      committedPcs should not contain (BigInt(0x20)) // Youngest addi x3 NOT committed
+      committedPcs should contain (BigInt(0x80))     // Handler addi x4 committed
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Test 31: Program E1 - MEM Trap Priority over Younger Taken Branch
+  // -------------------------------------------------------------
+  it should "execute Phase 8 Program E1: enforce MEM trap redirect priority over younger EX taken branch" in {
+    val mainCode = Seq(
+      lui(10, 0x80002),        // 0x00: lui x10, 0x80002
+      addi(5, 0, 0x80),        // 0x04: addi x5, x0, 0x80
+      sw(5, 10, 0x11C),        // 0x08: sw x5, 0x11C(x10) (TRAP_VECTOR := 0x80)
+      addi(5, 0, 1),           // 0x0C: addi x5, x0, 1
+      sw(5, 10, 0x114),        // 0x10: sw x5, 0x114(x10) (TRAP_CONTROL := 1)
+      csw(5, 0, 0),            // 0x14: csw x5, 0(c0) (faulting MEM instruction)
+      beq(0, 0, 16),           // 0x18: beq x0, x0, 16 (younger EX taken branch -> target 0x28, MUST be overridden!)
+      addi(14, 0, 111),        // 0x1C: killed
+      addi(14, 0, 222),        // 0x20: killed
+      addi(14, 0, 333),        // 0x24: killed
+      addi(14, 0, 444)         // 0x28: branch target (MUST NOT execute!)
+    )
+    val nops = Seq.fill(32 - mainCode.length)(addi(0, 0, 0))
+    val handlerCode = Seq(
+      addi(4, 0, 77)           // 0x80: addi x4, x0, 77 (handler reached!)
+    )
+    val progP8E1 = mainCode ++ nops ++ handlerCode
+
+    test(new PipelinedCore(initialProgram = progP8E1)) { dut =>
+      val committedPcs = scala.collection.mutable.ArrayBuffer[BigInt]()
+      for (_ <- 0 until 50) {
+        if (dut.io.commit.valid.peek().litToBoolean) {
+          committedPcs += dut.io.commit.pc.peek().litValue
+        }
+        dut.clock.step(1)
+      }
+      committedPcs should not contain (BigInt(0x14)) // csw denied
+      committedPcs should not contain (BigInt(0x18)) // branch killed
+      committedPcs should not contain (BigInt(0x28)) // branch target never reached
+      committedPcs should contain (BigInt(0x80))     // trap handler reached!
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Test 32: Program E2 - MEM Trap Priority over Younger Active Divider
+  // -------------------------------------------------------------
+  it should "execute Phase 8 Program E2: kill younger active divider immediately on MEM trap and eliminate pipeline deadlock" in {
+    val mainCode = Seq(
+      lui(10, 0x80002),        // 0x00: lui x10, 0x80002
+      addi(5, 0, 0x80),        // 0x04: addi x5, x0, 0x80
+      sw(5, 10, 0x11C),        // 0x08: sw x5, 0x11C(x10) (TRAP_VECTOR := 0x80)
+      addi(5, 0, 1),           // 0x0C: addi x5, x0, 1
+      sw(5, 10, 0x114),        // 0x10: sw x5, 0x114(x10) (TRAP_CONTROL := 1)
+      addi(1, 0, 100),         // 0x14: addi x1, x0, 100
+      addi(2, 0, 7),           // 0x18: addi x2, x0, 7
+      csw(5, 0, 0),            // 0x1C: csw x5, 0(c0) (faulting MEM instruction)
+      div(3, 1, 2)             // 0x20: div x3, x1, x2 (younger multi-cycle DIV in EX -> killed immediately!)
+    )
+    val nops = Seq.fill(32 - mainCode.length)(addi(0, 0, 0))
+    val handlerCode = Seq(
+      addi(4, 0, 99)           // 0x80: addi x4, x0, 99 (handler reached without 32-cycle deadlock!)
+    )
+    val progP8E2 = mainCode ++ nops ++ handlerCode
+
+    test(new PipelinedCore(initialProgram = progP8E2)) { dut =>
+      val committedPcs = scala.collection.mutable.ArrayBuffer[BigInt]()
+      var handlerReachedInCycles = -1
+      for (c <- 0 until 50) {
+        if (dut.io.commit.valid.peek().litToBoolean) {
+          val pc = dut.io.commit.pc.peek().litValue
+          committedPcs += pc
+          if (pc == BigInt(0x80) && handlerReachedInCycles == -1) {
+            handlerReachedInCycles = c
+          }
+        }
+        dut.clock.step(1)
+      }
+      committedPcs should not contain (BigInt(0x1C)) // csw denied
+      committedPcs should not contain (BigInt(0x20)) // div killed
+      committedPcs should contain (BigInt(0x80))     // handler reached
+      handlerReachedInCycles should be < 20          // Divider was killed immediately, no 32-cycle stall!
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Test 33: Program F - Handler Resume & Retry
+  // -------------------------------------------------------------
+  it should "execute Phase 8 Program F: expand capability bounds in handler, execute TRAP_RETURN, and successfully retry faulting instruction" in {
+    val mainCode = Seq(
+      lui(10, 0x80002),        // 0x00: lui x10, 0x80002
+      addi(5, 0, 0x80),        // 0x04: addi x5, x0, 0x80
+      sw(5, 10, 0x11C),        // 0x08: sw x5, 0x11C(x10) (TRAP_VECTOR := 0x80)
+      addi(5, 0, 1),           // 0x0C: addi x5, x0, 1
+      sw(5, 10, 0x114),        // 0x10: sw x5, 0x114(x10) (TRAP_CONTROL := 1)
+      addi(6, 0, 8),           // 0x14: addi x6, x0, 8
+      csetbounds(3, 1, 6),     // 0x18: csetbounds c3, c1, x6 (c3 len = 8)
+      addi(7, 0, 0x42),        // 0x1C: addi x7, x0, 0x42
+      csw(7, 3, 12),           // 0x20: csw x7, 12(c3) (OOB fault at len=8! Traps to 0x80!)
+      addi(8, 0, 88),          // 0x24: addi x8, x0, 88 (commits after retry!)
+      clw(9, 3, 12)            // 0x28: clw x9, 12(c3) (read back retried store -> 0x42)
+    )
+    val nops = Seq.fill(32 - mainCode.length)(addi(0, 0, 0))
+    val handlerCode = Seq(
+      addi(6, 0, 64),          // 0x80: addi x6, x0, 64
+      csetbounds(3, 1, 6),     // 0x84: csetbounds c3, c1, x6 (expand c3 bounds to 64 so offset 12 is valid!)
+      addi(5, 0, 1),           // 0x88: addi x5, x0, 1
+      sw(5, 10, 0x130)         // 0x8C: sw x5, 0x130(x10) (TRAP_RETURN -> return to TRAP_EPC=0x20 and retry!)
+    )
+    val progP8F = mainCode ++ nops ++ handlerCode
+
+    test(new PipelinedCore(initialProgram = progP8F)) { dut =>
+      val retiredVals = scala.collection.mutable.ArrayBuffer[BigInt]()
+      for (_ <- 0 until 80) {
+        if (dut.io.commit.valid.peek().litToBoolean) {
+          retiredVals += dut.io.commit.writeData.peek().litValue
+        }
+        dut.clock.step(1)
+      }
+      retiredVals should contain (BigInt(88))   // x8 committed after retry
+      retiredVals should contain (BigInt(0x42)) // x9 readback of successful retried store!
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Test 34: Program G - Handler Advance & Skip
+  // -------------------------------------------------------------
+  it should "execute Phase 8 Program G: advance TRAP_EPC in handler, execute TRAP_RETURN, and skip past faulting instruction" in {
+    val mainCode = Seq(
+      lui(10, 0x80002),        // 0x00: lui x10, 0x80002
+      addi(5, 0, 0x80),        // 0x04: addi x5, x0, 0x80
+      sw(5, 10, 0x11C),        // 0x08: sw x5, 0x11C(x10) (TRAP_VECTOR := 0x80)
+      addi(5, 0, 1),           // 0x0C: addi x5, x0, 1
+      sw(5, 10, 0x114),        // 0x10: sw x5, 0x114(x10) (TRAP_CONTROL := 1)
+      addi(7, 0, 0x77),        // 0x14: addi x7, x0, 0x77
+      csw(7, 0, 0),            // 0x18: csw x7, 0(c0) (NULL fault -> traps to 0x80)
+      addi(8, 0, 99),          // 0x1C: addi x8, x0, 99 (resumes here after advance!)
+      addi(9, 0, 111)          // 0x20: addi x9, x0, 111
+    )
+    val nops = Seq.fill(32 - mainCode.length)(addi(0, 0, 0))
+    val handlerCode = Seq(
+      lw(12, 10, 0x120),       // 0x80: lw x12, 0x120(x10) (read TRAP_EPC = 0x18)
+      addi(12, 12, 4),         // 0x84: addi x12, x12, 4 (compute 0x1C)
+      sw(12, 10, 0x120),       // 0x88: sw x12, 0x120(x10) (update TRAP_EPC := 0x1C)
+      addi(5, 0, 1),           // 0x8C: addi x5, x0, 1
+      sw(5, 10, 0x130)         // 0x90: sw x5, 0x130(x10) (TRAP_RETURN -> resume at 0x1C!)
+    )
+    val progP8G = mainCode ++ nops ++ handlerCode
+
+    test(new PipelinedCore(initialProgram = progP8G)) { dut =>
+      val committedPcs = scala.collection.mutable.ArrayBuffer[BigInt]()
+      val retiredVals = scala.collection.mutable.ArrayBuffer[BigInt]()
+      for (_ <- 0 until 60) {
+        if (dut.io.commit.valid.peek().litToBoolean) {
+          committedPcs += dut.io.commit.pc.peek().litValue
+          retiredVals += dut.io.commit.writeData.peek().litValue
+        }
+        dut.clock.step(1)
+      }
+      committedPcs should not contain (BigInt(0x18)) // Faulting instruction did not commit
+      committedPcs should contain (BigInt(0x1C))     // Resumed at 0x1C
+      committedPcs should contain (BigInt(0x20))     // Executed 0x20
+      retiredVals should contain (BigInt(99))
+      retiredVals should contain (BigInt(111))
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Test 35: Program H - OS Capability Context Switch
+  // -------------------------------------------------------------
+  it should "execute Phase 8 Program H: save process capability state to PCB, clear capability registers, and restore via root provenance" in {
+    // 1. Process 1 derives c3 from RAM root (c1, rootSelector=0) and c4 from MMIO root (c2, rootSelector=1)
+    val progH = Seq(
+      // Step 1: Process 1 Capability Setup
+      addi(5, 0, 0x100),       // 0x00: x5 = 0x100
+      cincoffset(3, 1, 5),     // 0x04: cincoffset c3, c1, x5
+      addi(6, 0, 32),          // 0x08: x6 = 32
+      csetbounds(3, 3, 6),     // 0x0C: csetbounds c3, c3, x6 (c3: base 0x100, len 32, perms RW)
+      addi(7, 0, 0x2000),      // 0x10: x7 = 0x2000
+      cincoffset(4, 2, 7),     // 0x14: cincoffset c4, c2, x7
+      addi(8, 0, 16),          // 0x18: x8 = 16
+      csetbounds(4, 4, 8),     // 0x1C: csetbounds c4, c4, x8 (c4: base 0x80002000, len 16, perms RW)
+
+      // Step 2: OS Saves c3 PCB to RAM @ 0x300 (via RAM root c1)
+      cgetbase(9, 3),          // 0x20: x9 = c3.base (0x100)
+      sw(9, 0, 0x300),         // 0x24: sw x9, 0x300(x0)
+      cgetlen(10, 3),          // 0x28: x10 = c3.length (32)
+      sw(10, 0, 0x304),        // 0x2C: sw x10, 0x304(x0)
+      cgetperm(11, 3),         // 0x30: x11 = c3.perms (3)
+      sw(11, 0, 0x308),        // 0x34: sw x11, 0x308(x0)
+      cgetoffset(12, 3),       // 0x38: x12 = c3.offset (0)
+      sw(12, 0, 0x30C),        // 0x3C: sw x12, 0x30C(x0)
+      addi(13, 0, 0),          // 0x40: x13 = rootSelector 0 (RAM root c1)
+      sw(13, 0, 0x310),        // 0x44: sw x13, 0x310(x0)
+
+      // Step 3: Context Switch - Clear Capability State
+      cclear(3),               // 0x48: cclear c3 -> c3 becomes NULL
+      cclear(4),               // 0x4C: cclear c4 -> c4 becomes NULL
+      cgettag(14, 3),          // 0x50: x14 = c3.tag (MUST be 0!)
+      cgettag(15, 4),          // 0x54: x15 = c4.tag (MUST be 0!)
+
+      // Step 4: OS Restores c3 from PCB @ 0x300
+      lw(16, 0, 0x300),        // 0x58: x16 = restored base (0x100)
+      lw(17, 0, 0x304),        // 0x5C: x17 = restored length (32)
+      lw(18, 0, 0x308),        // 0x60: x18 = restored perms (3)
+      lw(19, 0, 0x30C),        // 0x64: x19 = restored offset (0)
+      lw(20, 0, 0x310),        // 0x68: x20 = restored rootSelector (0 -> c1)
+
+      // Deterministic Re-derivation from Hardware Root c1
+      cincoffset(3, 1, 16),    // 0x6C: cincoffset c3, c1, x16 (cursor = 0x100)
+      csetbounds(3, 3, 17),    // 0x70: csetbounds c3, c3, x17 (base = 0x100, len = 32)
+      candperm(3, 3, 18),      // 0x74: candperm c3, c3, x18
+      cincoffset(3, 3, 19),    // 0x78: cincoffset c3, c3, x19
+
+      // Verify Restored c3 Parity
+      cgettag(21, 3),          // 0x7C: x21 = c3.tag (MUST be 1!)
+      cgetbase(22, 3),         // 0x80: x22 = c3.base (MUST be 0x100!)
+      cgetlen(23, 3)           // 0x84: x23 = c3.length (MUST be 32!)
+    )
+
+    test(new PipelinedCore(initialProgram = progH)) { dut =>
+      val retiredVals = scala.collection.mutable.ArrayBuffer[BigInt]()
+      for (_ <- 0 until 120) {
+        if (dut.io.commit.valid.peek().litToBoolean) {
+          retiredVals += dut.io.commit.writeData.peek().litValue
+        }
+        dut.clock.step(1)
+      }
+      retiredVals should contain (BigInt(0))     // x14 = c3 cleared tag
+      retiredVals should contain (BigInt(0))     // x15 = c4 cleared tag
+      retiredVals should contain (BigInt(1))     // x21 = restored c3.tag = 1
+      retiredVals should contain (BigInt(0x100)) // x22 = restored c3.base = 0x100
+      retiredVals should contain (BigInt(32))    // x23 = restored c3.length = 32
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Test 36: Program I - Sticky Audit Logger Independence
+  // -------------------------------------------------------------
+  it should "execute Phase 8 Program I: preserve frozen first-event audit logger independently of subsequent precise trap captures" in {
+    val mainCode = Seq(
+      lui(10, 0x80002),        // 0x00: lui x10, 0x80002
+      // Step 1: Pre-trap violation with TRAP_CONTROL = 0 (Phase 7 audit logger capture)
+      csw(0, 0, 0),            // 0x04: csw x0, 0(c0) (DENIED NULL write @ PC=0x04 -> SEC_PC := 0x04)
+
+      // Step 2: Enable Precise Traps
+      addi(5, 0, 0x80),        // 0x08: addi x5, x0, 0x80
+      sw(5, 10, 0x11C),        // 0x0C: sw x5, 0x11C(x10) (TRAP_VECTOR := 0x80)
+      addi(5, 0, 1),           // 0x10: addi x5, x0, 1
+      sw(5, 10, 0x114),        // 0x14: sw x5, 0x114(x10) (TRAP_CONTROL := 1)
+
+      // Step 3: Second violation triggers precise trap @ PC=0x28
+      addi(5, 0, 0x100),       // 0x18: addi x5, x0, 0x100
+      cincoffset(3, 1, 5),     // 0x1C: cincoffset c3, c1, x5
+      addi(6, 0, 16),          // 0x20: addi x6, x0, 16
+      csetbounds(3, 3, 6),     // 0x24: csetbounds c3, c3, x6
+      csw(5, 3, 20)            // 0x28: csw x5, 20(c3) (OOB fault -> TRAP_EPC := 0x28, traps to 0x80)
+    )
+    val nops = Seq.fill(32 - mainCode.length)(addi(0, 0, 0))
+    val handlerCode = Seq(
+      lw(11, 10, 0x104),       // 0x80: lw x11, 0x104(x10) (read SEC_PC -> MUST still be 0x04!)
+      lw(12, 10, 0x120)        // 0x84: lw x12, 0x120(x10) (read TRAP_EPC -> MUST be 0x28!)
+    )
+    val progP8I = mainCode ++ nops ++ handlerCode
+
+    test(new PipelinedCore(initialProgram = progP8I)) { dut =>
+      val retiredVals = scala.collection.mutable.ArrayBuffer[BigInt]()
+      for (_ <- 0 until 60) {
+        if (dut.io.commit.valid.peek().litToBoolean) {
+          retiredVals += dut.io.commit.writeData.peek().litValue
+        }
+        dut.clock.step(1)
+      }
+      retiredVals should contain (BigInt(0x04)) // x11 = SEC_PC (frozen first event)
+      retiredVals should contain (BigInt(0x28)) // x12 = TRAP_EPC (fresh precise trap)
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Test 37: Program J - Nested Violation & Double Fault
+  // -------------------------------------------------------------
+  it should "execute Phase 8 Program J: latch DOUBLE_FAULT on nested violation inside active trap handler without recursive redirect" in {
+    val mainCode = Seq(
+      lui(10, 0x80002),        // 0x00: lui x10, 0x80002
+      addi(5, 0, 0x80),        // 0x04: addi x5, x0, 0x80
+      sw(5, 10, 0x11C),        // 0x08: sw x5, 0x11C(x10) (TRAP_VECTOR := 0x80)
+      addi(5, 0, 1),           // 0x0C: addi x5, x0, 1
+      sw(5, 10, 0x114),        // 0x10: sw x5, 0x114(x10) (TRAP_CONTROL := 1)
+      csw(5, 0, 0)             // 0x14: csw x5, 0(c0) (primary trap @ PC=0x14 -> TRAP_ACTIVE=1, jumps to 0x80)
+    )
+    val nops = Seq.fill(32 - mainCode.length)(addi(0, 0, 0))
+    val handlerCode = Seq(
+      // Step 1: Accidental nested capability violation inside active handler
+      csw(5, 0, 0),            // 0x80: csw x5, 0(c0) (nested violation! DOUBLE_FAULT := 1, no recursive redirect)
+      addi(6, 0, 99),          // 0x84: addi x6, x0, 99 (handler continues sequentially!)
+      lw(7, 10, 0x118),        // 0x88: lw x7, 0x118(x10) (read TRAP_STATUS -> ACTIVE=1, DOUBLE_FAULT=1 -> 3)
+      lw(8, 10, 0x120)         // 0x8C: lw x8, 0x120(x10) (read TRAP_EPC -> MUST remain 0x14!)
+    )
+    val progP8J = mainCode ++ nops ++ handlerCode
+
+    test(new PipelinedCore(initialProgram = progP8J)) { dut =>
+      val retiredVals = scala.collection.mutable.ArrayBuffer[BigInt]()
+      for (_ <- 0 until 60) {
+        if (dut.io.commit.valid.peek().litToBoolean) {
+          retiredVals += dut.io.commit.writeData.peek().litValue
+        }
+        dut.clock.step(1)
+      }
+      retiredVals should contain (BigInt(99))   // x6 = 99 (handler continued sequentially)
+      retiredVals should contain (BigInt(3))    // x7 = TRAP_STATUS (ACTIVE=1, DOUBLE_FAULT=1)
+      retiredVals should contain (BigInt(0x14)) // x8 = TRAP_EPC (preserved from primary trap)
+    }
+  }
 }
+
 
