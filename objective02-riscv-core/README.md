@@ -245,7 +245,7 @@ CapabilityLite is a **CHERI-inspired capability security model**, not a full CHE
 
 ## Testing & Verification
 
-Run the complete Objective 2 test suite (93 tests):
+Run the complete Objective 2 test suite (94 tests):
 ```bash
 cd objective02-riscv-core
 sbt --batch test

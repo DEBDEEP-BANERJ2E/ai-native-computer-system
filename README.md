@@ -5,44 +5,29 @@ adapt to one another.
 
 ## Current Status
 
-The active implementation slice is **Objective 1: Digital Logic and Arithmetic
-Foundation**. It is a Chisel 3.6.0 hardware library, with the first reusable
-building blocks implemented under `objective01-digital-logic/`:
+The repository currently implements and verifies two foundational hardware layers:
 
-- Fredkin reversible gate
-- Toffoli reversible gate
-- Parameterized 2:1 and 4:1 muxes
-- Parameterized register and logical/arithmetic shifter
-- Parameterized ripple-carry adder with carry-in and carry-out
-- Parameterized carry-lookahead adder, including a 32-bit configuration
-- Flat and hierarchical (4-bit block) carry-lookahead adders
-- Parameterized unsigned shift-and-add multiplier baseline
-- Signed Radix-4 Booth multiplier
-- Wallace-style carry-save reduction tree
-- Connected Booth-Wallace multiplier using Booth rows and Wallace reduction
-- Parameterized ALU with RISC-V-oriented operations and status flags
-- Integrated `Objective1Subsystem` ALU/telemetry wrapper
-- Memory-mapped telemetry block with switching and EDP proxy counters
-- Python golden models for arithmetic, ALU, and telemetry behavior
-- Chisel SystemVerilog generation for individual benchmark targets and the integrated subsystem
-- Artix-7-oriented Yosys mapping statistics workflow
-- Registered timing wrappers for fair adder and multiplier comparisons
-- Exhaustive truth-table tests for both reversible gates
-- ChiselTest coverage for both muxes
-- Exhaustive 8-bit addition coverage for the ripple-carry baseline
-- Exhaustive 8-bit and randomized 32-bit carry-lookahead coverage
-- Exhaustive 8-bit and randomized 16-bit multiplier coverage
-- Exhaustive signed 8-bit Booth multiplication coverage
-- Carry-save compressor and multi-row Wallace reduction coverage
-- Exhaustive signed 8-bit Booth-Wallace multiplier coverage
-- Reusable register/shifter and ALU/telemetry integration coverage
-- Randomized 32-bit ALU operation and overflow coverage
-- Telemetry counter, switching-activity, and EDP register coverage
-- Python exhaustive/randomized golden-model coverage
+1. **Objective 1: Digital Logic and Arithmetic Foundation** (`objective01-digital-logic/`):
+   - Reversible computing primitives (Fredkin and Toffoli gates).
+   - Parameterized adders: Ripple-Carry Adder (RCA), Flat Carry-Lookahead Adder (CLA), and 4-bit block Hierarchical CLA.
+   - High-throughput multipliers: Simple Shift-and-Add, Radix-4 Booth, Wallace Reduction Tree, and Booth-Wallace Multiplier.
+   - Reusable 32-bit ALU with RISC-V operation set and status flags.
+   - Hardware telemetry subsystem (`REV_ENERGY_ACC`, `CLA_SWITCHING`, `MUL_THERMAL`, `EDP_CURRENT`, `EDP_CONFIG`).
+   - Full test suite: 24 unit and property tests with Python golden models.
 
-The Python AgentOS policy kernel in `objective10-agentos/agentos/` is an earlier exploratory slice
-for Objective 10. It remains separate so that the hardware library can become
-the reusable foundation for Objective 2's processor.
+2. **Objective 2: RISC-V Processor Core, System MMIO & CapabilityLite Security** (`objective02-riscv-core/`):
+   - **SingleCycleCore**: Canonical baseline RV32I/M execution core.
+   - **PipelinedCore**: 5-stage hazard-forwarding pipelined processor (IF, ID, EX, MEM, WB) with single-cycle EX/MEM and MEM/WB bypass paths, Load-Use stall detection, and Branch/JALR early evaluation.
+   - **RV32M Full Multi-Cycle Extension**: Hardware multiplier and multi-cycle non-restoring iterative divider (`DIV`, `DIVU`, `REM`, `REMU`, `MUL`, `MULH`, `MULHSU`, `MULHU`).
+   - **Hardware Telemetry & Cross-Layer System MMIO**: Telemetry block integration driven by retirement in WB, performance counters (`RETIRED_COUNT`, `BRANCH_TAKEN_COUNT`, `LOAD_USE_STALL_COUNT`, `DIV_BUSY_CYCLES`, `PIPELINE_STALL_COUNT`), and OS context classification registers (`CURRENT_CONTEXT`, `PROCESS_BEHAVIOR_CLASS`, `SCHED_HINT`).
+   - **CapabilityLite Hardware Security (Phase 7)**:
+     - 101-bit bounded capability registers `c0`–`c7` (`tag`, `base`, `length`, `perms`, `offset`) with hardware root initialization (`c1` = DataMemory, `c2` = SystemMMIO, `c0` = NULL).
+     - Custom-0 (`0x0B`) capability manipulation instructions (`CSETBOUNDS`, `CANDPERMS`, `CINCOFFSET`, `CGETTAG`, `CGETBASE`, `CGETLEN`, `CGETOFFSET`, `CGETPERMS`).
+     - Custom-1 (`0x2B`) capability-protected memory instructions (`CLW`, `CLH`, `CLHU`, `CLB`, `CLBU`, `CSW`, `CSH`, `CSB`).
+     - Pipeline Capability Checker in MEM stage enforcing Tag, Bounds, and Permission checks with atomic suppression and MMIO sticky security violation logging (`SEC_STATUS`, `SEC_PC`, `SEC_ADDR`, `SEC_INFO`, `SEC_CONTEXT`).
+   - **Verification**: 94 Chisel unit/integration tests and 17-benchmark cross-model differential verification suite (209 retirement events matched bit-exact across Python reference, SingleCycleCore, and PipelinedCore).
+
+The Python AgentOS policy kernel in `objective10-agentos/agentos/` is an exploratory slice for Objective 10 and remains decoupled from the core hardware pipelines.
 
 ## Objectives
 
@@ -213,14 +198,14 @@ they are not intended as the final CPU interface.
 
 ## Roadmap
 
-- Increase differential vector coverage and extend the comparison to telemetry.
-- Run nextpnr-Xilinx placement, routing, and timing using a matching Project
-   X-Ray database if that open-source database environment is available.
-- Treat physical Nexys A7 deployment as out of scope.
-
-Objective 2 is intentionally not started. The current repository freezes
-Objective 1 interfaces while its open-source place-and-route evaluation remains
-environment-dependent.
+- **Objective 2 Phase 8 (Upcoming Security Trapping & Freeze)**:
+  - Synchronous hardware security exception vectoring and trap handler redirection.
+  - OS capability context save/restore abstraction (`CURRENT_CONTEXT` domain isolation).
+  - Security attack & exploit mitigation evaluation benchmark suite.
+  - Hardware/OS co-design interface freeze for Objective 3 (Adaptive OS Scheduler) and Objective 8 (Unified Security).
+- **Downstream Cross-Layer Integration (Objectives 3–10)**:
+  - OS kernel adaptation driven by hardware telemetry and MMIO counters.
+  - Hierarchical tiered memory management and compiler feedback loops.
 
 ## Visualization
 
