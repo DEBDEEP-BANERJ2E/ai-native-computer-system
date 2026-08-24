@@ -84,4 +84,14 @@ class CapabilityRegFileSpec extends AnyFlatSpec with ChiselScalatestTester with 
       dut.io.rdata1.base.expect("h00000200".U)
     }
   }
+
+  it should "support parameterized DataMemory size for c1 root capability" in {
+    test(new CapabilityRegFile(8192)) { dut =>
+      dut.io.raddr1.poke(1.U)
+      dut.io.rdata1.tag.expect(true.B)
+      dut.io.rdata1.base.expect(0.U)
+      dut.io.rdata1.length.expect("h00002000".U) // 8192 bytes = 0x2000
+      dut.io.rdata1.perms.expect(CapabilityPerms.RW)
+    }
+  }
 }

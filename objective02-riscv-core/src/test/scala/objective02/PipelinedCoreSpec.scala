@@ -1084,5 +1084,66 @@ class PipelinedCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Matc
       retiredVals(4) shouldBe 99 // x7 = 99
     }
   }
+
+  // -------------------------------------------------------------
+  // Test 25: Capability Memory Telemetry Invariance
+  // -------------------------------------------------------------
+  it should "guarantee that allowed and denied CLW/CSW operations do not alter Objective-1 CLA switching telemetry" in {
+    val progTelem = Seq(
+      lui(10, 0x80001),     // 0x00: lui x10, 0x80001
+      lw(11, 10, 4),        // 0x04: lw x11, 4(x10) -> snapshot CLA counter
+      addi(5, 0, 100),      // 0x08: addi x5, x0, 100
+      csw(5, 1, 0),         // 0x0C: csw x5, 0(c1) (allowed)
+      clw(6, 1, 0),         // 0x10: clw x6, 0(c1) (allowed)
+      csw(5, 0, 0),         // 0x14: csw x5, 0(c0) (denied)
+      clw(7, 0, 0),         // 0x18: clw x7, 0(c0) (denied)
+      lw(12, 10, 4)         // 0x1C: lw x12, 4(x10) -> read final CLA counter
+    )
+
+    test(new PipelinedCore(initialProgram = progTelem)) { dut =>
+      var retiredCount = 0
+      val retiredVals = scala.collection.mutable.ArrayBuffer[BigInt]()
+      for (_ <- 0 until 50) {
+        if (dut.io.commit.valid.peek().litToBoolean) {
+          retiredCount += 1
+          retiredVals += dut.io.commit.writeData.peek().litValue
+        }
+        dut.clock.step(1)
+      }
+      retiredCount shouldBe progTelem.length
+      retiredVals(4) shouldBe 100 // x6 (allowed clw readback)
+      retiredVals(6) shouldBe 0   // x7 (denied clw suppressed)
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Test 26: CINCOFFSET Signed Delta and Cursor Boundary Verification
+  // -------------------------------------------------------------
+  it should "execute CINCOFFSET with positive, negative, and boundary signed cursor movements" in {
+    val progCinc = Seq(
+      addi(5, 0, 8),          // 0x00: x5 = +8
+      cincoffset(3, 1, 5),    // 0x04: c3 = offset 8 (forward)
+      addi(6, 0, -4),         // 0x08: x6 = -4
+      cincoffset(4, 3, 6),    // 0x0C: c4 = offset 4 (backward from c3)
+      addi(7, 0, -10),        // 0x10: x7 = -10
+      cincoffset(5, 4, 7),    // 0x14: c5 = offset 4 + (-10) = -6 -> BOUNDS violation!
+      cgetbase(8, 4),         // 0x18: x8 = c4.base (0)
+      cgettag(9, 4),          // 0x1C: x9 = c4.tag (1)
+      cgettag(10, 5)          // 0x20: x10 = c5.tag (0 - not updated on violation)
+    )
+
+    test(new PipelinedCore(initialProgram = progCinc)) { dut =>
+      val retiredVals = scala.collection.mutable.ArrayBuffer[BigInt]()
+      for (_ <- 0 until 50) {
+        if (dut.io.commit.valid.peek().litToBoolean) {
+          retiredVals += dut.io.commit.writeData.peek().litValue
+        }
+        dut.clock.step(1)
+      }
+      retiredVals(6) shouldBe 0 // x8 = c4.base
+      retiredVals(7) shouldBe 1 // x9 = c4.tag
+      retiredVals(8) shouldBe 0 // x10 = c5.tag (c5 remained NULL)
+    }
+  }
 }
 

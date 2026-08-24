@@ -516,9 +516,9 @@ class RV32Interpreter:
                         if cd_idx != 0:
                             self.cap_regs[cd_idx] = CapabilityLite(True, src_cap.base, src_cap.length, new_perms, src_cap.offset)
                 elif funct3 == 2: # CINCOFFSET cd, cs1, rs2
-                    s_offset = self.to_signed(src_cap.offset, 32)
+                    u_offset = src_cap.offset & 0xFFFFFFFF
                     s_delta = self.to_signed(val2, 32)
-                    new_offset_s = s_offset + s_delta
+                    new_offset_s = u_offset + s_delta
                     cursor_addr = (src_cap.base + src_cap.offset) & 0xFFFFFFFF
                     if not src_cap.tag:
                         self.trigger_security_violation(3, 1, cursor_addr, current_pc) # INVALID_CAPABILITY
@@ -578,7 +578,6 @@ class RV32Interpreter:
                     is_word = (f3 == 2)
                     misaligned = (is_half and (mem_addr & 1 != 0)) or (is_word and (mem_addr & 3 != 0))
                     is_current_load = True
-                    telem_valid = True; telem_cla = True; telem_res = mem_addr
                     if cap_allowed:
                         if (mem_addr >> 16) == 0x8000: # MMIO
                             if is_word and not misaligned:
@@ -616,7 +615,6 @@ class RV32Interpreter:
                             mem_read = False; reg_write = False
                     else:
                         mem_read = False; reg_write = False
-                        telem_valid = False
 
                 else: # Protected Store (CSB, CSH, CSW)
                     mem_write_req = True
@@ -625,7 +623,6 @@ class RV32Interpreter:
                     is_half = (f3 == 1)
                     is_word = (f3 == 2)
                     misaligned = (is_half and (mem_addr & 1 != 0)) or (is_word and (mem_addr & 3 != 0))
-                    telem_valid = True; telem_cla = True; telem_res = mem_addr
                     if cap_allowed:
                         if (mem_addr >> 16) == 0x8000: # MMIO
                             if is_word and not misaligned:
@@ -656,7 +653,6 @@ class RV32Interpreter:
                             mem_write = False
                     else:
                         mem_write = False
-                        telem_valid = False
 
         else:
             illegal = True

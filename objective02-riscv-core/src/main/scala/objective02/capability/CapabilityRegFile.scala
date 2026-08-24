@@ -11,15 +11,15 @@ class CapabilityRegFileIO extends Bundle {
   val wdata  = Input(new CapabilityLite)
 }
 
-class CapabilityRegFile extends Module {
+class CapabilityRegFile(dmemSizeBytes: Int = 4096) extends Module {
   val io = IO(new CapabilityRegFileIO)
 
   // Capability register storage for c1 to c7
-  // c1: Data Memory Root (0x00000000 - 0x00001000, 4 KiB, RW)
+  // c1: Data Memory Root (0x00000000 - dmemSizeBytes, RW)
   val c1Init = Wire(new CapabilityLite)
   c1Init.tag    := true.B
   c1Init.base   := "h00000000".U(32.W)
-  c1Init.length := "h00001000".U(32.W)
+  c1Init.length := dmemSizeBytes.U(32.W)
   c1Init.perms  := CapabilityPerms.RW
   c1Init.offset := 0.U(32.W)
 

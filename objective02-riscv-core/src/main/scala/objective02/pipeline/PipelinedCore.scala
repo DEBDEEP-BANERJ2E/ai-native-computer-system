@@ -91,7 +91,7 @@ class PipelinedCore(
   val imem           = Module(new InstructionMemory(imemDepthWords, initialProgram))
   val decoder        = Module(new Decoder(enableFullM = true, enableCapabilities = true))
   val rf             = Module(new RegisterFile)
-  val capRf          = Module(new CapabilityRegFile)
+  val capRf          = Module(new CapabilityRegFile(dmemSizeBytes))
   val alu            = Module(new ALU(32)) // Reusing Objective 1 verified arithmetic datapath
   val bju            = Module(new BranchJumpUnit)
   val capChecker     = Module(new CapabilityChecker)
@@ -294,13 +294,13 @@ class PipelinedCore(
   candDerivedCap.perms  := inCap.perms & forwardedRs2(2, 0)
   candDerivedCap.offset := inCap.offset
 
-  // 3. CINCOFFSET cd, cs1, rs2 (rs2 = signed 32-bit delta)
-  val signedOffset = inCap.offset.asSInt
-  val signedDelta  = forwardedRs2.asSInt
+  // 3. CINCOFFSET cd, cs1, rs2 (inCap.offset = unsigned 32-bit, rs2 = signed 32-bit delta)
+  val offsetExtS   = Cat(0.U(1.W), inCap.offset).asSInt // 33-bit positive signed
+  val deltaExtS    = forwardedRs2.asSInt                // 32-bit signed
   // 34-bit signed arithmetic to prevent overflow wrapping
-  val newOffsetS   = signedOffset +& signedDelta
-  val capLenS      = Cat(0.U(1.W), inCap.length).asSInt
-  val cincOffsetOk = (newOffsetS >= 0.S) && (newOffsetS <= capLenS)
+  val newOffsetS   = offsetExtS +& deltaExtS
+  val capLenExtS   = Cat(0.U(1.W), inCap.length).asSInt // 33-bit positive signed
+  val cincOffsetOk = (newOffsetS >= 0.S) && (newOffsetS <= capLenExtS)
   val cincSuccess  = inCap.tag && cincOffsetOk
 
   val cincDerivedCap = Wire(new CapabilityLite)
@@ -386,7 +386,7 @@ class PipelinedCore(
   val exTelemetryMulActive = WireDefault(false.B)
   val exTelemetryResult    = exResult
 
-  when(exValid && !divHold && !exControls.illegalInstruction && !exControls.isSecurityOp && !exControls.isCapOp) {
+  when(exValid && !divHold && !exControls.illegalInstruction && !exControls.isSecurityOp && !exControls.isCapOp && !exControls.isCapMem) {
     when(exControls.isMul) {
       exTelemetryValid     := true.B
       exTelemetryMulActive := true.B
@@ -502,7 +502,7 @@ class PipelinedCore(
   memWbReg.io.in.regWrite           := exMemReg.io.out.regWrite && Mux(exMemReg.io.out.memRead, capAccessAllow && Mux(systemMMIO.io.windowHit, systemMMIO.io.readAccepted, !dmem.io.misaligned), true.B)
   memWbReg.io.in.wbSource           := exMemReg.io.out.wbSource
   memWbReg.io.in.illegalInstruction := exMemReg.io.out.illegalInstruction
-  memWbReg.io.in.telemetryValid     := exMemReg.io.out.telemetryValid
+  memWbReg.io.in.telemetryValid     := exMemReg.io.out.telemetryValid && capAccessAllow
   memWbReg.io.in.telemetryClaActive := exMemReg.io.out.telemetryClaActive
   memWbReg.io.in.telemetryMulActive := exMemReg.io.out.telemetryMulActive
   memWbReg.io.in.telemetryResult    := exMemReg.io.out.telemetryResult
