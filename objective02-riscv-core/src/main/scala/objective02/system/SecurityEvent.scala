@@ -3,9 +3,10 @@ package objective02.system
 import chisel3._
 
 object AccessType {
-  val READ    = 0.U(2.W)
-  val WRITE   = 1.U(2.W)
-  val EXECUTE = 2.U(2.W)
+  val READ                 = 0.U(2.W)
+  val WRITE                = 1.U(2.W)
+  val EXECUTE              = 2.U(2.W)
+  val CAPABILITY_OPERATION = 3.U(2.W)
 }
 
 object SecurityReason {
@@ -15,6 +16,7 @@ object SecurityReason {
   val READ_PERMISSION    = 3.U(4.W)
   val WRITE_PERMISSION   = 4.U(4.W)
   val EXECUTE_PERMISSION = 5.U(4.W)
+  val MONOTONICITY       = 6.U(4.W)
 }
 
 class SecurityViolationEvent extends Bundle {

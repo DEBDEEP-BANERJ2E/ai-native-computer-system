@@ -20,6 +20,7 @@ class SystemMMIOIO extends Bundle {
   // Software hint outputs to hardware
   val schedHint              = Output(UInt(32.W))
   val processBehaviorClass   = Output(UInt(32.W))
+  val currentContext         = Output(UInt(32.W))
 
   // Hardware event inputs (pipeline monitoring)
   val retireEvent            = Input(Bool())
@@ -58,6 +59,7 @@ class SystemMMIO extends Module {
   // =========================================================================
   val processBehaviorClassReg = RegInit(0.U(32.W))
   val schedHintReg            = RegInit(0.U(32.W))
+  val currentContextReg       = RegInit(0.U(32.W))
   val retiredCountReg         = RegInit(0.U(32.W))
   val branchTakenCountReg     = RegInit(0.U(32.W))
   val loadUseStallCountReg     = RegInit(0.U(32.W))
@@ -67,6 +69,7 @@ class SystemMMIO extends Module {
 
   io.schedHint            := schedHintReg
   io.processBehaviorClass := processBehaviorClassReg
+  io.currentContext       := currentContextReg
 
   // Performance event counter updates
   when(io.retireEvent) {
@@ -191,6 +194,10 @@ class SystemMMIO extends Module {
           readDataWire     := lastCommitPcReg
           readAcceptedWire := true.B
         }
+        is(MMIOAddress.CURRENT_CONTEXT) {
+          readDataWire     := currentContextReg
+          readAcceptedWire := true.B
+        }
 
         // Objective 2 Security Event Logger Window
         is(MMIOAddress.SEC_STATUS) {
@@ -227,6 +234,10 @@ class SystemMMIO extends Module {
         }
         is(MMIOAddress.SCHED_HINT) {
           schedHintReg      := io.writeData
+          writeAcceptedWire := true.B
+        }
+        is(MMIOAddress.CURRENT_CONTEXT) {
+          currentContextReg := io.writeData
           writeAcceptedWire := true.B
         }
         is(MMIOAddress.SEC_STATUS) {

@@ -14,7 +14,26 @@ object Opcodes {
   val OP_LUI      = "b0110111".U(7.W) // 0x37: LUI (Load Upper Immediate)
   val OP_AUIPC    = "b0010111".U(7.W) // 0x17: AUIPC (Add Upper Immediate to PC)
   val OP_SYSTEM   = "b1110011".U(7.W) // 0x73: ECALL, EBREAK, CSRRW, CSRRS, CSRRC
-  val OP_SECURITY = "b0001011".U(7.W) // 0x0B: Custom capability/security check instructions
+  val OP_SECURITY = "b0001011".U(7.W) // 0x0B: Custom capability/security check instructions (legacy alias)
+  val OP_CAP      = "b0001011".U(7.W) // 0x0B: custom-0 Capability manipulation instructions
+  val OP_CAP_MEM  = "b0101011".U(7.W) // 0x2B: custom-1 Capability protected memory instructions
+
+  // 3-bit Funct3 fields for Capability Manipulation (OP_CAP = 0x0B)
+  val FUNCT3_CSETBOUNDS = "b000".U(3.W) // CSETBOUNDS cd, cs1, rs2
+  val FUNCT3_CANDPERM   = "b001".U(3.W) // CANDPERM cd, cs1, rs2
+  val FUNCT3_CINCOFFSET = "b010".U(3.W) // CINCOFFSET cd, cs1, rs2
+  val FUNCT3_CGETBASE   = "b011".U(3.W) // CGETBASE rd, cs1
+  val FUNCT3_CGETLEN    = "b100".U(3.W) // CGETLEN rd, cs1
+  val FUNCT3_CGETTAG    = "b101".U(3.W) // CGETTAG rd, cs1
+  val FUNCT3_CGETPERM   = "b110".U(3.W) // CGETPERM rd, cs1
+
+  // 3-bit Funct3 fields for Capability Memory Operations (OP_CAP_MEM = 0x2B)
+  val FUNCT3_CLB = "b000".U(3.W) // CLB rd, offset(cs1)
+  val FUNCT3_CLH = "b001".U(3.W) // CLH rd, offset(cs1)
+  val FUNCT3_CLW = "b010".U(3.W) // CLW rd, offset(cs1)
+  val FUNCT3_CSB = "b100".U(3.W) // CSB rs2, offset(cs1)
+  val FUNCT3_CSH = "b101".U(3.W) // CSH rs2, offset(cs1)
+  val FUNCT3_CSW = "b110".U(3.W) // CSW rs2, offset(cs1)
 
   // 3-bit Funct3 fields for R-Type / I-Type Arithmetic & Logic
   val FUNCT3_ADD_SUB = "b000".U(3.W) // ADD / SUB / ADDI

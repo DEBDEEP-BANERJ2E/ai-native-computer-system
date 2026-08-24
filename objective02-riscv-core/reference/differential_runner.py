@@ -201,7 +201,149 @@ MMIO_BENCHMARKS = {
 }
 
 # =========================================================================
-# Part 4: Three Canonical Hazard-Free Programs (Preserved from Phase 3.1)
+# Part 4: Phase 7 CapabilityLite Security Benchmarks (Programs A - F)
+# Verified 2-Way: Python Reference <==> PipelinedCore
+# =========================================================================
+def encode_r(funct7, rs2, rs1, funct3, rd, opcode):
+    return (((funct7 & 0x7F) << 25) | ((rs2 & 0x1F) << 20) | ((rs1 & 0x1F) << 15) | ((funct3 & 0x7) << 12) | ((rd & 0x1F) << 7) | (opcode & 0x7F)) & 0xFFFFFFFF
+
+def encode_i(imm, rs1, funct3, rd, opcode):
+    imm12 = imm & 0xFFF
+    return (((imm12 & 0xFFF) << 20) | ((rs1 & 0x1F) << 15) | ((funct3 & 0x7) << 12) | ((rd & 0x1F) << 7) | (opcode & 0x7F)) & 0xFFFFFFFF
+
+def encode_s(imm, rs2, rs1, funct3, opcode):
+    imm12 = imm & 0xFFF
+    imm11_5 = (imm12 >> 5) & 0x7F
+    imm4_0 = imm12 & 0x1F
+    return ((imm11_5 << 25) | ((rs2 & 0x1F) << 20) | ((rs1 & 0x1F) << 15) | ((funct3 & 0x7) << 12) | (imm4_0 << 7) | (opcode & 0x7F)) & 0xFFFFFFFF
+
+def encode_u(imm20, rd, opcode):
+    return (((imm20 & 0xFFFFF) << 12) | ((rd & 0x1F) << 7) | (opcode & 0x7F)) & 0xFFFFFFFF
+
+def csetbounds(cd, cs1, rs2): return encode_r(0x00, rs2, cs1, 0x0, cd, 0x0B)
+def candperm(cd, cs1, rs2):   return encode_r(0x00, rs2, cs1, 0x1, cd, 0x0B)
+def cincoffset(cd, cs1, rs2): return encode_r(0x00, rs2, cs1, 0x2, cd, 0x0B)
+def cgetbase(rd, cs1):        return encode_r(0x00, 0, cs1, 0x3, rd, 0x0B)
+def cgetlen(rd, cs1):         return encode_r(0x00, 0, cs1, 0x4, rd, 0x0B)
+def cgettag(rd, cs1):         return encode_r(0x00, 0, cs1, 0x5, rd, 0x0B)
+def cgetperm(rd, cs1):        return encode_r(0x00, 0, cs1, 0x6, rd, 0x0B)
+
+def clb(rd, cs1, offset): return encode_i(offset, cs1, 0x0, rd, 0x2B)
+def clh(rd, cs1, offset): return encode_i(offset, cs1, 0x1, rd, 0x2B)
+def clw(rd, cs1, offset): return encode_i(offset, cs1, 0x2, rd, 0x2B)
+def csb(rs2, cs1, offset): return encode_s(offset, rs2, cs1, 0x4, 0x2B)
+def csh(rs2, cs1, offset): return encode_s(offset, rs2, cs1, 0x5, 0x2B)
+def csw(rs2, cs1, offset): return encode_s(offset, rs2, cs1, 0x6, 0x2B)
+
+def addi(rd, rs1, imm): return encode_i(imm, rs1, 0x0, rd, 0x13)
+def lui(rd, imm20):     return encode_u(imm20, rd, 0x37)
+def lw(rd, rs1, offset): return encode_i(offset, rs1, 0x2, rd, 0x03)
+def sw(rs2, rs1, offset): return encode_s(offset, rs2, rs1, 0x2, 0x23)
+
+CAPABILITY_BENCHMARKS = {
+    "progA": {
+        "name": "Program A: Buffer Overflow Containment (Out-of-Bounds Detection)",
+        "code": [
+            addi(5, 0, 0x100),
+            cincoffset(3, 1, 5),
+            addi(6, 0, 16),
+            csetbounds(3, 3, 6),
+            addi(7, 0, 0x11),
+            csw(7, 3, 0),
+            addi(8, 0, 0x22),
+            csw(8, 3, 12),
+            addi(9, 0, 0x33),
+            csw(9, 3, 13),
+            clw(11, 3, 0),
+            clw(12, 3, 12),
+            lui(10, 0x80002),
+            lw(13, 10, 0x100),
+            lw(14, 10, 0x10C),
+            lw(15, 10, 0x108),
+            lw(16, 10, 0x104)
+        ],
+        "cycles": 17,
+        "pipe_trace": "test_traces/progA_capability_bounds.json"
+    },
+    "progB": {
+        "name": "Program B: Permission Attenuation & Privilege Escalation Prevention",
+        "code": [
+            addi(5, 0, 1),
+            candperm(3, 1, 5),
+            clw(6, 3, 0),
+            addi(7, 0, 99),
+            csw(7, 3, 0),
+            addi(8, 0, 3),
+            candperm(3, 3, 8),
+            cgetperm(9, 3),
+            lui(10, 0x80002),
+            lw(13, 10, 0x100),
+            lw(14, 10, 0x10C),
+            lw(15, 10, 0x108),
+            lw(16, 10, 0x104)
+        ],
+        "cycles": 13,
+        "pipe_trace": "test_traces/progB_capability_perms.json"
+    },
+    "progC": {
+        "name": "Program C: NULL / Uninitialized Capability Access Denials",
+        "code": [
+            addi(5, 0, 77),
+            csw(5, 0, 0),
+            clw(6, 4, 0),
+            lui(10, 0x80002),
+            lw(13, 10, 0x100),
+            lw(14, 10, 0x10C),
+            lw(15, 10, 0x108),
+            lw(16, 10, 0x104)
+        ],
+        "cycles": 8,
+        "pipe_trace": "test_traces/progC_capability_null.json"
+    },
+    "progD": {
+        "name": "Program D: Capability Register RAW Dependencies (Zero-NOP Pipeline Interlock)",
+        "code": [
+            addi(5, 0, 64),
+            csetbounds(3, 1, 5),
+            addi(6, 0, 123),
+            csw(6, 3, 0),
+            clw(7, 3, 0)
+        ],
+        "cycles": 5,
+        "pipe_trace": "test_traces/progD_capability_raw.json"
+    },
+    "progE": {
+        "name": "Program E: Protected MMIO Authorization & Layer Separation",
+        "code": [
+            lui(9, 2),
+            cincoffset(3, 2, 9),
+            addi(5, 0, 42),
+            csw(5, 3, 4),
+            clw(6, 3, 4),
+            addi(7, 0, 999),
+            csw(7, 3, 0x0C),
+            lui(10, 0x80002),
+            lw(8, 10, 0x100)
+        ],
+        "cycles": 9,
+        "pipe_trace": "test_traces/progE_capability_mmio.json"
+    },
+    "progF": {
+        "name": "Program F: Combined GPR & Capability Forwarding Dependencies",
+        "code": [
+            addi(5, 0, 16),
+            csetbounds(3, 1, 5),
+            addi(6, 0, 99),
+            csw(6, 3, 0),
+            clw(7, 3, 0)
+        ],
+        "cycles": 5,
+        "pipe_trace": "test_traces/progF_capability_gpr_forwarding.json"
+    }
+}
+
+# =========================================================================
+# Part 5: Three Canonical Hazard-Free Programs (Preserved from Phase 3.1)
 # =========================================================================
 PIPELINE_3WAY_PROGRAMS = {
     "pipe_prog1": {
@@ -446,11 +588,42 @@ def run_differential_comparison(use_existing_traces: bool = False):
         passed_mmio_programs += 1
 
     print("\n" + "=" * 80)
+    print("SECTION 5: 2-WAY DIFFERENTIAL VERIFICATION ON PHASE 7 CAPABILITYLITE SECURITY")
+    print("           (PYTHON REFERENCE <==> PIPELINED CORE)")
+    print("=" * 80)
+
+    total_cap_events = 0
+    passed_cap_programs = 0
+
+    for prog_key, prog_info in CAPABILITY_BENCHMARKS.items():
+        print(f"\nVerifying 2-Way Parity on {prog_info['name']}...")
+        with open(prog_info["pipe_trace"], "r") as f:
+            pipe_events = json.load(f)
+
+        interp = RV32Interpreter()
+        interp.load_program(prog_info["code"])
+        py_trace = interp.run(prog_info["cycles"])
+
+        assert len(py_trace) == len(pipe_events), (
+            f"Python ({len(py_trace)}) vs PipelinedCore ({len(pipe_events)}) retirement count mismatch"
+        )
+
+        for i in range(len(py_trace)):
+            total_cap_events += 1
+            py_ev = py_trace[i]
+            pipe_ev = pipe_events[i]
+            compare_event("Python", py_ev, "PipelinedCore", pipe_ev, i)
+
+        print(f"  [PASS] All {len(py_trace)} retirement events matched 1:1 across Python and PipelinedCore!")
+        passed_cap_programs += 1
+
+    print("\n" + "=" * 80)
     print("DIFFERENTIAL VERIFICATION SUMMARY:")
     print(f"  1. Original 5 Benchmarks (3-Way Bit-Exact Parity): {passed_orig_programs}/{len(ORIGINAL_BENCHMARKS)} Programs ({total_orig_events} events bit-exact across Python, SingleCycleCore, and PipelinedCore)")
     print(f"  2. RV32M Benchmarks      (2-Way Bit-Exact Parity): {passed_rv32m_programs}/{len(RV32M_BENCHMARKS)} Programs ({total_rv32m_events} events bit-exact across Python and PipelinedCore)")
     print(f"  3. Canonical Benchmarks  (3-Way Bit-Exact Parity): {passed_canon_programs}/{len(PIPELINE_3WAY_PROGRAMS)} Programs ({total_canon_events} events bit-exact across Python, SingleCycleCore, and PipelinedCore)")
     print(f"  4. System MMIO Benchmarks(2-Way Bit-Exact Parity): {passed_mmio_programs}/{len(MMIO_BENCHMARKS)} Programs ({total_mmio_events} events bit-exact across Python and PipelinedCore)")
+    print(f"  5. CapabilityLite Benchmarks (2-Way Parity):       {passed_cap_programs}/{len(CAPABILITY_BENCHMARKS)} Programs ({total_cap_events} events bit-exact across Python and PipelinedCore)")
     print("=" * 80)
 
 if __name__ == "__main__":

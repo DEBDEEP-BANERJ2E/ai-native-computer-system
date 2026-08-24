@@ -31,6 +31,10 @@ class ImmediateGenerator extends Module {
 
   // Multiplexed immediate based on opcode
   val op = opcode(inst)
+  val f3 = funct3(inst)
+  val isCapMemStore = (op === OP_CAP_MEM) && inst(14)
+  val capMemImm = Mux(isCapMemStore, io.immS, io.immI)
+
   io.immOut := MuxLookup(op, 0.U(32.W))(Seq(
     OP_I_TYPE   -> io.immI,
     OP_LOAD     -> io.immI,
@@ -40,7 +44,8 @@ class ImmediateGenerator extends Module {
     OP_LUI      -> io.immU,
     OP_AUIPC    -> io.immU,
     OP_JAL      -> io.immJ,
-    OP_SYSTEM   -> io.immCSR
+    OP_SYSTEM   -> io.immCSR,
+    OP_CAP_MEM  -> capMemImm
   ))
 }
 

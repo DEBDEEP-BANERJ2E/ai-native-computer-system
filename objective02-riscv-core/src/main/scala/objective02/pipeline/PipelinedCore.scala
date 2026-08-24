@@ -6,6 +6,7 @@ import objective02.decode._
 import objective02.datapath.{BranchJumpUnit, ProgramCounter, RegisterFile}
 import objective02.memory.{DataMemory, InstructionMemory}
 import objective02.execute.{RV32MMultiplier, IterativeDivider}
+import objective02.capability.{CapabilityLite, CapabilityPerms, CapabilityRegFile, CapabilityChecker}
 import objective02.system.{SystemMMIO, SecurityViolationEvent, AccessType, SecurityReason}
 import objective01.datapath.ALU
 
@@ -58,6 +59,7 @@ class PipelinedCoreIO extends Bundle {
   val forwardA       = Output(UInt(2.W))
   val forwardB       = Output(UInt(2.W))
   val loadUseHazard  = Output(Bool())
+  val capHazard      = Output(Bool())
   val stallIF        = Output(Bool())
   val stallID        = Output(Bool())
 
@@ -71,6 +73,7 @@ class PipelinedCoreIO extends Bundle {
   // System & Cross-Layer Interface Observability
   val schedHint            = Output(UInt(32.W))
   val processBehaviorClass = Output(UInt(32.W))
+  val currentContext       = Output(UInt(32.W))
 }
 
 class PipelinedCore(
@@ -86,10 +89,12 @@ class PipelinedCore(
   // =========================================================================
   val pc             = Module(new ProgramCounter(bootAddress))
   val imem           = Module(new InstructionMemory(imemDepthWords, initialProgram))
-  val decoder        = Module(new Decoder(enableFullM = true))
+  val decoder        = Module(new Decoder(enableFullM = true, enableCapabilities = true))
   val rf             = Module(new RegisterFile)
+  val capRf          = Module(new CapabilityRegFile)
   val alu            = Module(new ALU(32)) // Reusing Objective 1 verified arithmetic datapath
   val bju            = Module(new BranchJumpUnit)
+  val capChecker     = Module(new CapabilityChecker)
   val dmem           = Module(new DataMemory(dmemSizeBytes))
   val systemMMIO     = Module(new SystemMMIO)
   val forwardingUnit = Module(new ForwardingUnit)
@@ -111,7 +116,7 @@ class PipelinedCore(
   val wbData         = Wire(UInt(32.W))
 
   // =========================================================================
-  // 2. HAZARD DETECTION (ID Stage Consumer vs EX Stage Load Producer)
+  // 2. HAZARD DETECTION (ID Stage Consumer vs EX/MEM Stage Producers)
   // =========================================================================
   val idValid       = ifIdReg.io.out.valid
   val idInstruction = ifIdReg.io.out.instruction
@@ -120,28 +125,25 @@ class PipelinedCore(
 
   decoder.io.instruction := idInstruction
 
-  // Precise consumer source register usage detection
-  val idUsesRs1 = idValid && (
-    decoder.io.controls.aluSrcA === ALUSrcA.RS1 ||
-    decoder.io.controls.branchType =/= BranchType.NONE ||
-    decoder.io.controls.jumpType === JumpType.JALR
-  )
+  hazardUnit.io.idValid          := idValid
+  hazardUnit.io.idRs1            := decoder.io.rs1
+  hazardUnit.io.idRs2            := decoder.io.rs2
+  hazardUnit.io.idUsesRs1        := decoder.io.controls.usesIntRs1
+  hazardUnit.io.idUsesRs2        := decoder.io.controls.usesIntRs2
+  hazardUnit.io.idCs1            := decoder.io.rs1(2, 0)
+  hazardUnit.io.idUsesCapRs1     := decoder.io.controls.usesCapRs1
 
-  val idUsesRs2 = idValid && (
-    decoder.io.controls.aluSrcB === ALUSrcB.RS2 ||
-    decoder.io.controls.branchType =/= BranchType.NONE ||
-    decoder.io.controls.memWrite
-  )
+  hazardUnit.io.idExValid        := idExReg.io.out.valid
+  hazardUnit.io.idExMemRead      := idExReg.io.out.controls.memRead
+  hazardUnit.io.idExRd           := idExReg.io.out.rd
+  hazardUnit.io.idExCapRegWrite  := idExReg.io.out.controls.capRegWrite
+  hazardUnit.io.idExCapRd        := idExReg.io.out.capRd
 
-  hazardUnit.io.idValid     := idValid
-  hazardUnit.io.idRs1       := decoder.io.rs1
-  hazardUnit.io.idRs2       := decoder.io.rs2
-  hazardUnit.io.idUsesRs1   := idUsesRs1
-  hazardUnit.io.idUsesRs2   := idUsesRs2
-  hazardUnit.io.idExValid   := idExReg.io.out.valid
-  hazardUnit.io.idExMemRead := idExReg.io.out.controls.memRead
-  hazardUnit.io.idExRd      := idExReg.io.out.rd
-  hazardUnit.io.branchTaken := branchTaken
+  hazardUnit.io.exMemValid       := exMemReg.io.out.valid
+  hazardUnit.io.exMemCapRegWrite := exMemReg.io.out.capRegWrite
+  hazardUnit.io.exMemCapRd       := exMemReg.io.out.capRd
+
+  hazardUnit.io.branchTaken      := branchTaken
 
   // Divider EX Hold Logic
   val exValid       = idExReg.io.out.valid
@@ -179,7 +181,10 @@ class PipelinedCore(
   rf.io.rs1Address := decoder.io.rs1
   rf.io.rs2Address := decoder.io.rs2
 
-  // WB -> ID Same-Cycle Register Bypass
+  // Capability Register Read & Hazard Bypass
+  capRf.io.raddr1 := decoder.io.rs1(2, 0)
+
+  // WB -> ID Same-Cycle GPR Register Bypass
   val idRs1Val = Mux(wbRegWrite && (wbRd =/= 0.U) && (wbRd === decoder.io.rs1), wbData, rf.io.rs1Data)
   val idRs2Val = Mux(wbRegWrite && (wbRd =/= 0.U) && (wbRd === decoder.io.rs2), wbData, rf.io.rs2Data)
 
@@ -195,16 +200,19 @@ class PipelinedCore(
   idExReg.io.in.rs1Data     := idRs1Val
   idExReg.io.in.rs2Data     := idRs2Val
   idExReg.io.in.imm         := decoder.io.imm
+  idExReg.io.in.capRs1Data  := capRf.io.rdata1
+  idExReg.io.in.capRd       := decoder.io.rd(2, 0)
+  idExReg.io.in.capCs1      := decoder.io.rs1(2, 0)
   idExReg.io.in.controls    := decoder.io.controls
 
   // =========================================================================
-  // 5. STAGE 3: EXECUTE, FORWARDING & BRANCH EVALUATION (EX)
+  // 5. STAGE 3: EXECUTE, FORWARDING & CAPABILITY DERIVATION (EX)
   // =========================================================================
   val exPc          = idExReg.io.out.pc
   val exPcPlus4     = idExReg.io.out.pcPlus4
   val exInstruction = idExReg.io.out.instruction
 
-  // Data Forwarding Unit Connections
+  // Data Forwarding Unit Connections (Integer Registers)
   forwardingUnit.io.idExRs1       := idExReg.io.out.rs1
   forwardingUnit.io.idExRs2       := idExReg.io.out.rs2
   forwardingUnit.io.exMemValid    := exMemReg.io.out.valid
@@ -258,10 +266,108 @@ class PipelinedCore(
   divRem.io.isSigned := (exControls.mOp === MOp.DIV) || (exControls.mOp === MOp.REM)
   divRem.io.start    := exValid && isDivOp && !divRem.io.busy
 
-  // Result Multiplexing
-  val exResult = Mux(exControls.isMul, rv32mMult.io.result,
+  // =========================================================================
+  // Phase 7: Capability Manipulation & Derivation Execution (EX)
+  // =========================================================================
+  val inCap = idExReg.io.out.capRs1Data
+
+  // 1. CSETBOUNDS cd, cs1, rs2 (rs2 = length)
+  val csetNewBase33   = Cat(0.U(1.W), inCap.base) +& Cat(0.U(1.W), inCap.offset)
+  val csetReqLen33    = Cat(0.U(1.W), forwardedRs2)
+  val csetReqTop33    = csetNewBase33 +& csetReqLen33
+  val csetParentTop33 = Cat(0.U(1.W), inCap.base) +& Cat(0.U(1.W), inCap.length)
+  val csetBoundsOk    = (csetNewBase33 >= Cat(0.U(1.W), inCap.base)) && (csetReqTop33 <= csetParentTop33)
+  val csetSuccess     = inCap.tag && csetBoundsOk
+
+  val csetDerivedCap = Wire(new CapabilityLite)
+  csetDerivedCap.tag    := csetSuccess
+  csetDerivedCap.base   := inCap.base + inCap.offset
+  csetDerivedCap.length := forwardedRs2
+  csetDerivedCap.perms  := inCap.perms
+  csetDerivedCap.offset := 0.U(32.W)
+
+  // 2. CANDPERM cd, cs1, rs2 (rs2 = permission mask)
+  val candDerivedCap = Wire(new CapabilityLite)
+  candDerivedCap.tag    := inCap.tag
+  candDerivedCap.base   := inCap.base
+  candDerivedCap.length := inCap.length
+  candDerivedCap.perms  := inCap.perms & forwardedRs2(2, 0)
+  candDerivedCap.offset := inCap.offset
+
+  // 3. CINCOFFSET cd, cs1, rs2 (rs2 = signed 32-bit delta)
+  val signedOffset = inCap.offset.asSInt
+  val signedDelta  = forwardedRs2.asSInt
+  // 34-bit signed arithmetic to prevent overflow wrapping
+  val newOffsetS   = signedOffset +& signedDelta
+  val capLenS      = Cat(0.U(1.W), inCap.length).asSInt
+  val cincOffsetOk = (newOffsetS >= 0.S) && (newOffsetS <= capLenS)
+  val cincSuccess  = inCap.tag && cincOffsetOk
+
+  val cincDerivedCap = Wire(new CapabilityLite)
+  cincDerivedCap.tag    := cincSuccess
+  cincDerivedCap.base   := inCap.base
+  cincDerivedCap.length := inCap.length
+  cincDerivedCap.perms  := inCap.perms
+  cincDerivedCap.offset := newOffsetS(31, 0).asUInt
+
+  // Derivation violation metadata pipeline latches
+  val exCapViolationValid      = WireDefault(false.B)
+  val exCapViolationReason     = WireDefault(SecurityReason.NONE)
+  val exCapViolationAddress    = WireDefault(0.U(32.W))
+  val exCapViolationAccessType = AccessType.CAPABILITY_OPERATION
+
+  val exCapWriteData = WireDefault(CapabilityLite.nullCapability())
+  val exCapRegWrite  = WireDefault(false.B)
+
+  when(exValid && exControls.isCapOp) {
+    switch(exControls.capOp) {
+      is(CapOp.CSETBOUNDS) {
+        when(csetSuccess) {
+          exCapWriteData := csetDerivedCap
+          exCapRegWrite  := true.B
+        }.otherwise {
+          exCapViolationValid   := true.B
+          exCapViolationReason  := Mux(!inCap.tag, SecurityReason.INVALID_CAPABILITY, SecurityReason.MONOTONICITY)
+          exCapViolationAddress := inCap.base + inCap.offset
+        }
+      }
+      is(CapOp.CANDPERM) {
+        when(inCap.tag) {
+          exCapWriteData := candDerivedCap
+          exCapRegWrite  := true.B
+        }.otherwise {
+          exCapViolationValid   := true.B
+          exCapViolationReason  := SecurityReason.INVALID_CAPABILITY
+          exCapViolationAddress := inCap.base
+        }
+      }
+      is(CapOp.CINCOFFSET) {
+        when(cincSuccess) {
+          exCapWriteData := cincDerivedCap
+          exCapRegWrite  := true.B
+        }.otherwise {
+          exCapViolationValid   := true.B
+          exCapViolationReason  := Mux(!inCap.tag, SecurityReason.INVALID_CAPABILITY, SecurityReason.BOUNDS)
+          exCapViolationAddress := inCap.base + inCap.offset
+        }
+      }
+    }
+  }
+
+  // Capability protected memory effective address (cursor + immediate)
+  val capEffectiveAddress = (inCap.base + inCap.offset) + idExReg.io.out.imm
+
+  // Result Multiplexing for EX Stage
+  val exResult = Mux(exControls.isCapMem, capEffectiveAddress,
+                 Mux(exControls.isCapOp, MuxLookup(exControls.capOp, 0.U(32.W))(Seq(
+                   CapOp.CGETBASE -> inCap.base,
+                   CapOp.CGETLEN  -> inCap.length,
+                   CapOp.CGETTAG  -> Cat(0.U(31.W), inCap.tag),
+                   CapOp.CGETPERM -> Cat(0.U(29.W), inCap.perms)
+                 )),
+                 Mux(exControls.isMul, rv32mMult.io.result,
                  Mux(isDivOp, Mux(exControls.mOp === MOp.DIV || exControls.mOp === MOp.DIVU, divRem.io.quotient, divRem.io.remainder),
-                 alu.io.result))
+                 alu.io.result))))
 
   // Branch and Jump evaluation using forwarded register values
   bju.io.pc         := exPc
@@ -280,7 +386,7 @@ class PipelinedCore(
   val exTelemetryMulActive = WireDefault(false.B)
   val exTelemetryResult    = exResult
 
-  when(exValid && !divHold && !exControls.illegalInstruction && !exControls.isSecurityOp) {
+  when(exValid && !divHold && !exControls.illegalInstruction && !exControls.isSecurityOp && !exControls.isCapOp) {
     when(exControls.isMul) {
       exTelemetryValid     := true.B
       exTelemetryMulActive := true.B
@@ -298,45 +404,78 @@ class PipelinedCore(
 
   exMemReg.io.stall := false.B
   exMemReg.io.flush := false.B
-  exMemReg.io.in.valid              := exValid && !divHold
-  exMemReg.io.in.pc                 := exPc
-  exMemReg.io.in.pcPlus4            := exPcPlus4
-  exMemReg.io.in.instruction        := exInstruction
-  exMemReg.io.in.rd                 := idExReg.io.out.rd
-  exMemReg.io.in.aluResult          := exResult
-  exMemReg.io.in.rs2Data            := forwardedRs2 // Forwarded store payload
-  exMemReg.io.in.imm                := idExReg.io.out.imm
-  exMemReg.io.in.regWrite           := exControls.regWrite
-  exMemReg.io.in.memRead            := exControls.memRead
-  exMemReg.io.in.memWrite           := exControls.memWrite
-  exMemReg.io.in.memWidth           := exControls.memWidth
-  exMemReg.io.in.wbSource           := exControls.wbSource
-  exMemReg.io.in.illegalInstruction := exControls.illegalInstruction
-  exMemReg.io.in.telemetryValid     := exTelemetryValid
-  exMemReg.io.in.telemetryClaActive := exTelemetryClaActive
-  exMemReg.io.in.telemetryMulActive := exTelemetryMulActive
-  exMemReg.io.in.telemetryResult    := exTelemetryResult
+  exMemReg.io.in.valid                  := exValid && !divHold
+  exMemReg.io.in.pc                     := exPc
+  exMemReg.io.in.pcPlus4                := exPcPlus4
+  exMemReg.io.in.instruction            := exInstruction
+  exMemReg.io.in.rd                     := idExReg.io.out.rd
+  exMemReg.io.in.aluResult              := exResult
+  exMemReg.io.in.rs2Data                := forwardedRs2 // Forwarded store payload
+  exMemReg.io.in.imm                    := idExReg.io.out.imm
+  exMemReg.io.in.capRegWrite            := exCapRegWrite
+  exMemReg.io.in.capRd                  := idExReg.io.out.capRd
+  exMemReg.io.in.capWriteData           := exCapWriteData
+  exMemReg.io.in.isCapMem               := exControls.isCapMem
+  exMemReg.io.in.capSource              := inCap
+  exMemReg.io.in.capViolationValid      := exCapViolationValid
+  exMemReg.io.in.capViolationReason     := exCapViolationReason
+  exMemReg.io.in.capViolationAddress    := exCapViolationAddress
+  exMemReg.io.in.capViolationAccessType := exCapViolationAccessType
+  exMemReg.io.in.regWrite               := exControls.regWrite
+  exMemReg.io.in.memRead                := exControls.memRead
+  exMemReg.io.in.memWrite               := exControls.memWrite
+  exMemReg.io.in.memWidth               := exControls.memWidth
+  exMemReg.io.in.wbSource               := exControls.wbSource
+  exMemReg.io.in.illegalInstruction     := exControls.illegalInstruction
+  exMemReg.io.in.telemetryValid         := exTelemetryValid
+  exMemReg.io.in.telemetryClaActive     := exTelemetryClaActive
+  exMemReg.io.in.telemetryMulActive     := exTelemetryMulActive
+  exMemReg.io.in.telemetryResult        := exTelemetryResult
 
   // =========================================================================
-  // 6. STAGE 4: MEMORY ACCESS (MEM)
+  // 6. STAGE 4: MEMORY ACCESS & CAPABILITY AUTHORIZATION (MEM)
   // =========================================================================
   val memValid       = exMemReg.io.out.valid
   val memPc          = exMemReg.io.out.pc
   val memPcPlus4     = exMemReg.io.out.pcPlus4
   val memInstruction = exMemReg.io.out.instruction
 
-  // SystemMMIO Interception
+  // Capability Authorization Checker in MEM Stage
+  capChecker.io.cap              := exMemReg.io.out.capSource
+  capChecker.io.effectiveAddress := exMemReg.io.out.aluResult
+  capChecker.io.accessSize       := Mux(exMemReg.io.out.memWidth === MemWidth.BYTE || exMemReg.io.out.memWidth === MemWidth.BYTE_U, 1.U,
+                                    Mux(exMemReg.io.out.memWidth === MemWidth.HALF || exMemReg.io.out.memWidth === MemWidth.HALF_U, 2.U, 4.U))
+  capChecker.io.isRead           := exMemReg.io.out.memRead
+  capChecker.io.isWrite          := exMemReg.io.out.memWrite
+
+  val isCapMemAccess = memValid && exMemReg.io.out.isCapMem
+  val capAccessAllow = Mux(isCapMemAccess, capChecker.io.allow, true.B)
+  val isCapMemViolation = isCapMemAccess && capChecker.io.violation
+  val isDerivationViolation = memValid && exMemReg.io.out.capViolationValid
+
+  // Unified Security Violation Event generation in MEM stage
+  val secEvent = Wire(new SecurityViolationEvent)
+  secEvent.valid      := isCapMemViolation || isDerivationViolation
+  secEvent.pc         := exMemReg.io.out.pc // Offending instruction PC!
+  secEvent.address    := Mux(isCapMemViolation, exMemReg.io.out.aluResult, exMemReg.io.out.capViolationAddress)
+  secEvent.accessType := Mux(isCapMemViolation, Mux(exMemReg.io.out.memWrite, AccessType.WRITE, AccessType.READ), exMemReg.io.out.capViolationAccessType)
+  secEvent.reason     := Mux(isCapMemViolation, capChecker.io.reason, exMemReg.io.out.capViolationReason)
+  secEvent.context    := systemMMIO.io.currentContext
+
+  systemMMIO.io.securityEvent := secEvent
+
+  // SystemMMIO Interception (suppressed if capability access is denied)
   systemMMIO.io.address     := exMemReg.io.out.aluResult
-  systemMMIO.io.memReadReq  := memValid && exMemReg.io.out.memRead
-  systemMMIO.io.memWriteReq := memValid && exMemReg.io.out.memWrite
+  systemMMIO.io.memReadReq  := memValid && exMemReg.io.out.memRead && capAccessAllow
+  systemMMIO.io.memWriteReq := memValid && exMemReg.io.out.memWrite && capAccessAllow
   systemMMIO.io.writeData   := exMemReg.io.out.rs2Data
   systemMMIO.io.memWidth    := exMemReg.io.out.memWidth
 
-  // DataMemory Access (suppressed when MMIO window hits)
+  // DataMemory Access (suppressed when MMIO window hits or capability denied)
   dmem.io.address   := exMemReg.io.out.aluResult
   dmem.io.writeData := exMemReg.io.out.rs2Data
-  dmem.io.memRead   := memValid && exMemReg.io.out.memRead && !systemMMIO.io.windowHit
-  dmem.io.memWrite  := memValid && exMemReg.io.out.memWrite && !systemMMIO.io.windowHit
+  dmem.io.memRead   := memValid && exMemReg.io.out.memRead && capAccessAllow && !systemMMIO.io.windowHit
+  dmem.io.memWrite  := memValid && exMemReg.io.out.memWrite && capAccessAllow && !systemMMIO.io.windowHit
   dmem.io.memWidth  := exMemReg.io.out.memWidth
 
   val memReadData = Mux(systemMMIO.io.windowHit, systemMMIO.io.readData, dmem.io.readData)
@@ -351,13 +490,16 @@ class PipelinedCore(
   memWbReg.io.in.aluResult          := exMemReg.io.out.aluResult
   memWbReg.io.in.memReadData        := memReadData
   memWbReg.io.in.imm                := exMemReg.io.out.imm
-  memWbReg.io.in.memRead            := memValid && exMemReg.io.out.memRead && Mux(systemMMIO.io.windowHit, systemMMIO.io.readAccepted, !dmem.io.misaligned)
+  memWbReg.io.in.capRegWrite        := exMemReg.io.out.capRegWrite
+  memWbReg.io.in.capRd              := exMemReg.io.out.capRd
+  memWbReg.io.in.capWriteData       := exMemReg.io.out.capWriteData
+  memWbReg.io.in.memRead            := memValid && exMemReg.io.out.memRead && capAccessAllow && Mux(systemMMIO.io.windowHit, systemMMIO.io.readAccepted, !dmem.io.misaligned)
   memWbReg.io.in.memReadReq         := memValid && exMemReg.io.out.memRead
-  memWbReg.io.in.memWrite           := memValid && exMemReg.io.out.memWrite && Mux(systemMMIO.io.windowHit, systemMMIO.io.writeAccepted, !dmem.io.misaligned)
+  memWbReg.io.in.memWrite           := memValid && exMemReg.io.out.memWrite && capAccessAllow && Mux(systemMMIO.io.windowHit, systemMMIO.io.writeAccepted, !dmem.io.misaligned)
   memWbReg.io.in.memWriteReq        := memValid && exMemReg.io.out.memWrite
   memWbReg.io.in.memAddress         := exMemReg.io.out.aluResult
   memWbReg.io.in.memWriteData       := exMemReg.io.out.rs2Data
-  memWbReg.io.in.regWrite           := exMemReg.io.out.regWrite && Mux(exMemReg.io.out.memRead, Mux(systemMMIO.io.windowHit, systemMMIO.io.readAccepted, !dmem.io.misaligned), true.B)
+  memWbReg.io.in.regWrite           := exMemReg.io.out.regWrite && Mux(exMemReg.io.out.memRead, capAccessAllow && Mux(systemMMIO.io.windowHit, systemMMIO.io.readAccepted, !dmem.io.misaligned), true.B)
   memWbReg.io.in.wbSource           := exMemReg.io.out.wbSource
   memWbReg.io.in.illegalInstruction := exMemReg.io.out.illegalInstruction
   memWbReg.io.in.telemetryValid     := exMemReg.io.out.telemetryValid
@@ -386,6 +528,11 @@ class PipelinedCore(
   rf.io.writeData   := wbData
   rf.io.writeEnable := wbRegWrite
 
+  // Capability Register Writeback at WB
+  capRf.io.wen   := wbValid && memWbReg.io.out.capRegWrite
+  capRf.io.waddr := memWbReg.io.out.capRd
+  capRf.io.wdata := memWbReg.io.out.capWriteData
+
   // Telemetry Retirement Update
   systemMMIO.io.telemetryValid      := wbValid && memWbReg.io.out.telemetryValid
   systemMMIO.io.telemetryClaActive  := memWbReg.io.out.telemetryClaActive
@@ -396,19 +543,9 @@ class PipelinedCore(
   systemMMIO.io.retireEvent         := wbValid
   systemMMIO.io.commitPc            := wbPc
   systemMMIO.io.branchTaken         := exValid && bju.io.taken && (exControls.branchType =/= BranchType.NONE) && (idExReg.io.out.controls.jumpType === JumpType.NONE)
-  systemMMIO.io.loadUseStall        := hazardUnit.io.stallIF
+  systemMMIO.io.loadUseStall        := hazardUnit.io.loadUseHazard
   systemMMIO.io.dividerBusy         := divRem.io.busy
   systemMMIO.io.pipelineStall       := stallIF
-
-  // Security Violation Event Interface (inactive for Phase 6)
-  val secEvent = Wire(new SecurityViolationEvent)
-  secEvent.valid      := false.B
-  secEvent.pc         := 0.U(32.W)
-  secEvent.address    := 0.U(32.W)
-  secEvent.accessType := AccessType.READ
-  secEvent.reason     := SecurityReason.NONE
-  secEvent.context    := systemMMIO.io.schedHint
-  systemMMIO.io.securityEvent := secEvent
 
   // =========================================================================
   // 8. Architectural Commit / Retirement Interface
@@ -458,6 +595,7 @@ class PipelinedCore(
   io.forwardA       := forwardingUnit.io.forwardA
   io.forwardB       := forwardingUnit.io.forwardB
   io.loadUseHazard  := hazardUnit.io.loadUseHazard
+  io.capHazard      := hazardUnit.io.capHazard
   io.stallIF        := stallIF
   io.stallID        := stallID
 
@@ -469,4 +607,5 @@ class PipelinedCore(
 
   io.schedHint            := systemMMIO.io.schedHint
   io.processBehaviorClass := systemMMIO.io.processBehaviorClass
+  io.currentContext       := systemMMIO.io.currentContext
 }

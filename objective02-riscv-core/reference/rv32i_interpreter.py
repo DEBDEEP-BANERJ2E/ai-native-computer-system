@@ -8,6 +8,13 @@ and cycle-by-cycle commit event logging.
 
 from typing import List, Dict, Optional, Tuple, NamedTuple
 
+class CapabilityLite(NamedTuple):
+    tag: bool
+    base: int
+    length: int
+    perms: int
+    offset: int
+
 class CommitEvent(NamedTuple):
     pc: int
     instruction: int
@@ -26,15 +33,18 @@ class RV32Interpreter:
     def __init__(self, memory_size: int = 4096):
         self.memory_size = memory_size
         self.regs = [0] * 32
+        self.cap_regs: List[CapabilityLite] = [CapabilityLite(False, 0, 0, 0, 0) for _ in range(8)]
+        self.imem = bytearray(memory_size)
         self.memory = bytearray(memory_size)
         self.pc = 0
         self.halted = False
         self.trace: List[CommitEvent] = []
 
-        # Phase 6: System MMIO, Telemetry & Performance Counter State
+        # Phase 6 & 7: System MMIO, Telemetry & Performance Counter State
         self.mmio_regs: Dict[int, int] = {
             0x80002004: 0, # PROCESS_BEHAVIOR_CLASS (RW)
             0x80002008: 0, # SCHED_HINT (RW)
+            0x80002024: 0, # CURRENT_CONTEXT (RW)
             0x80001010: 1, # EDP_CONFIG (RO, 1)
         }
         self.telemetry_prev_result = 0
@@ -64,9 +74,20 @@ class RV32Interpreter:
         # State tracking for stall emulation
         self.last_was_load = False
         self.last_load_rd = 0
+        self.reset()
 
     def reset(self):
         self.regs = [0] * 32
+        self.cap_regs = [
+            CapabilityLite(False, 0, 0, 0, 0),                       # c0: NULL
+            CapabilityLite(True, 0x00000000, 0x00001000, 3, 0),      # c1: RAM Root (0..0x1000, RW)
+            CapabilityLite(True, 0x80000000, 0x00010000, 3, 0),      # c2: MMIO Root (0x80000000..0x80010000, RW)
+            CapabilityLite(False, 0, 0, 0, 0),                       # c3: NULL
+            CapabilityLite(False, 0, 0, 0, 0),                       # c4: NULL
+            CapabilityLite(False, 0, 0, 0, 0),                       # c5: NULL
+            CapabilityLite(False, 0, 0, 0, 0),                       # c6: NULL
+            CapabilityLite(False, 0, 0, 0, 0),                       # c7: NULL
+        ]
         self.memory = bytearray(self.memory_size)
         self.pc = 0
         self.halted = False
@@ -74,6 +95,7 @@ class RV32Interpreter:
         self.mmio_regs = {
             0x80002004: 0,
             0x80002008: 0,
+            0x80002024: 0,
             0x80001010: 1,
         }
         self.telemetry_prev_result = 0
@@ -98,11 +120,20 @@ class RV32Interpreter:
         self.last_was_load = False
         self.last_load_rd = 0
 
+    def trigger_security_violation(self, access_type: int, reason: int, addr: int, pc: int):
+        if self.sec_status == 0:
+            self.sec_status = 1
+            self.sec_pc = pc & 0xFFFFFFFF
+            self.sec_addr = addr & 0xFFFFFFFF
+            self.sec_info = ((access_type & 0x3) << 4) | (reason & 0xF)
+            self.sec_context = self.mmio_regs.get(0x80002024, 0)
+
     def load_program(self, words: List[int], start_addr: int = 0):
+        self.imem = bytearray(self.memory_size)
         for i, word in enumerate(words):
             addr = start_addr + i * 4
-            if addr + 4 <= len(self.memory):
-                self.memory[addr:addr+4] = int(word & 0xFFFFFFFF).to_bytes(4, 'little')
+            if addr + 4 <= len(self.imem):
+                self.imem[addr:addr+4] = int(word & 0xFFFFFFFF).to_bytes(4, 'little')
 
     def to_signed(self, val: int, bits: int = 32) -> int:
         val = val & ((1 << bits) - 1)
@@ -111,12 +142,12 @@ class RV32Interpreter:
         return val
 
     def step(self) -> Optional[CommitEvent]:
-        if self.pc < 0 or self.pc + 4 > len(self.memory):
+        if self.pc < 0 or self.pc + 4 > len(self.imem):
             self.halted = True
             return None
 
         current_pc = self.pc
-        inst = int.from_bytes(self.memory[current_pc:current_pc+4], 'little')
+        inst = int.from_bytes(self.imem[current_pc:current_pc+4], 'little')
         opcode = inst & 0x7F
         rd = (inst >> 7) & 0x1F
         funct3 = (inst >> 12) & 0x07
@@ -336,6 +367,7 @@ class RV32Interpreter:
                     elif mem_addr == 0x80002018: write_data = self.div_busy_cycles & 0xFFFFFFFF
                     elif mem_addr == 0x8000201C: write_data = self.pipeline_stall_count & 0xFFFFFFFF
                     elif mem_addr == 0x80002020: write_data = self.mem_vis_last_commit_pc & 0xFFFFFFFF
+                    elif mem_addr == 0x80002024: write_data = self.mmio_regs.get(0x80002024, 0)
                     elif mem_addr == 0x80002100: write_data = self.sec_status
                     elif mem_addr == 0x80002104: write_data = self.sec_pc
                     elif mem_addr == 0x80002108: write_data = self.sec_addr
@@ -385,6 +417,9 @@ class RV32Interpreter:
                         mem_write = True
                     elif mem_addr == 0x80002008:
                         self.mmio_regs[0x80002008] = val2 & 0xFFFFFFFF
+                        mem_write = True
+                    elif mem_addr == 0x80002024:
+                        self.mmio_regs[0x80002024] = val2 & 0xFFFFFFFF
                         mem_write = True
                     elif mem_addr == 0x80002100:
                         if val2 & 1:
@@ -452,9 +487,176 @@ class RV32Interpreter:
             write_data = (current_pc + imm_u) & 0xFFFFFFFF
             telem_valid = True; telem_cla = True; telem_res = write_data
 
-        elif opcode == 0x0B: # OP_SECURITY placeholder
-            # Deliberately a legal placeholder in Phase 6 with no architectural side effects or telemetry
-            pass
+        elif opcode == 0x0B: # OP_CAP: Capability Manipulation
+            cs1_idx = rs1
+            cd_idx = rd
+            if cs1_idx > 7 or funct7 != 0:
+                illegal = True
+            elif funct3 <= 2 and cd_idx > 7:
+                illegal = True
+            else:
+                src_cap = self.cap_regs[cs1_idx]
+                if funct3 == 0: # CSETBOUNDS cd, cs1, rs2
+                    req_base = (src_cap.base + src_cap.offset) & 0xFFFFFFFF
+                    req_len = val2 & 0xFFFFFFFF
+                    req_top = req_base + req_len
+                    parent_top = src_cap.base + src_cap.length
+                    if not src_cap.tag:
+                        self.trigger_security_violation(3, 1, req_base, current_pc) # INVALID_CAPABILITY
+                    elif req_top > parent_top:
+                        self.trigger_security_violation(3, 6, req_base, current_pc) # MONOTONICITY
+                    else:
+                        if cd_idx != 0:
+                            self.cap_regs[cd_idx] = CapabilityLite(True, req_base, req_len, src_cap.perms, 0)
+                elif funct3 == 1: # CANDPERM cd, cs1, rs2
+                    if not src_cap.tag:
+                        self.trigger_security_violation(3, 1, src_cap.base, current_pc) # INVALID_CAPABILITY
+                    else:
+                        new_perms = src_cap.perms & (val2 & 0x7)
+                        if cd_idx != 0:
+                            self.cap_regs[cd_idx] = CapabilityLite(True, src_cap.base, src_cap.length, new_perms, src_cap.offset)
+                elif funct3 == 2: # CINCOFFSET cd, cs1, rs2
+                    s_offset = self.to_signed(src_cap.offset, 32)
+                    s_delta = self.to_signed(val2, 32)
+                    new_offset_s = s_offset + s_delta
+                    cursor_addr = (src_cap.base + src_cap.offset) & 0xFFFFFFFF
+                    if not src_cap.tag:
+                        self.trigger_security_violation(3, 1, cursor_addr, current_pc) # INVALID_CAPABILITY
+                    elif new_offset_s < 0 or new_offset_s > src_cap.length:
+                        self.trigger_security_violation(3, 2, cursor_addr, current_pc) # BOUNDS
+                    else:
+                        if cd_idx != 0:
+                            self.cap_regs[cd_idx] = CapabilityLite(True, src_cap.base, src_cap.length, src_cap.perms, new_offset_s & 0xFFFFFFFF)
+                elif funct3 == 3: # CGETBASE rd, cs1
+                    reg_write = True
+                    write_data = src_cap.base & 0xFFFFFFFF
+                elif funct3 == 4: # CGETLEN rd, cs1
+                    reg_write = True
+                    write_data = src_cap.length & 0xFFFFFFFF
+                elif funct3 == 5: # CGETTAG rd, cs1
+                    reg_write = True
+                    write_data = 1 if src_cap.tag else 0
+                elif funct3 == 6: # CGETPERM rd, cs1
+                    reg_write = True
+                    write_data = src_cap.perms & 0x7
+                else:
+                    illegal = True
+
+        elif opcode == 0x2B: # OP_CAP_MEM: Capability Protected Memory
+            cs1_idx = rs1
+            if cs1_idx > 7:
+                illegal = True
+            else:
+                src_cap = self.cap_regs[cs1_idx]
+                is_store = (funct3 & 0x4) != 0
+                f3 = funct3 & 0x3
+                access_size = 1 if f3 == 0 else (2 if f3 == 1 else 4)
+                imm = imm_s if is_store else imm_i
+                eff_addr = (src_cap.base + src_cap.offset + imm) & 0xFFFFFFFF
+                access_end = eff_addr + access_size
+                cap_top = src_cap.base + src_cap.length
+
+                # Precedence: INVALID_CAPABILITY -> BOUNDS -> PERMISSION
+                cap_allowed = True
+                if not src_cap.tag:
+                    cap_allowed = False
+                    self.trigger_security_violation(1 if is_store else 0, 1, eff_addr, current_pc) # INVALID_CAPABILITY
+                elif not (eff_addr >= src_cap.base and access_end <= cap_top):
+                    cap_allowed = False
+                    self.trigger_security_violation(1 if is_store else 0, 2, eff_addr, current_pc) # BOUNDS
+                elif is_store and not (src_cap.perms & 2):
+                    cap_allowed = False
+                    self.trigger_security_violation(1, 4, eff_addr, current_pc) # WRITE_PERMISSION
+                elif (not is_store) and not (src_cap.perms & 1):
+                    cap_allowed = False
+                    self.trigger_security_violation(0, 3, eff_addr, current_pc) # READ_PERMISSION
+
+                if not is_store: # Protected Load (CLB, CLH, CLW)
+                    mem_read_req = True
+                    mem_addr = eff_addr
+                    is_half = (f3 == 1)
+                    is_word = (f3 == 2)
+                    misaligned = (is_half and (mem_addr & 1 != 0)) or (is_word and (mem_addr & 3 != 0))
+                    is_current_load = True
+                    telem_valid = True; telem_cla = True; telem_res = mem_addr
+                    if cap_allowed:
+                        if (mem_addr >> 16) == 0x8000: # MMIO
+                            if is_word and not misaligned:
+                                mem_read = True; reg_write = True
+                                if mem_addr == 0x80001000: write_data = 0
+                                elif mem_addr == 0x80001004: write_data = self.mem_vis_cla_switching & 0xFFFFFFFF
+                                elif mem_addr == 0x80001008: write_data = self.mem_vis_mul_thermal & 0xFFFFFFFF
+                                elif mem_addr == 0x8000100C: write_data = ((self.rev_energy + self.mem_vis_cla_switching + self.mem_vis_mul_thermal) * 1) & 0xFFFFFFFF
+                                elif mem_addr == 0x80001010: write_data = 1
+                                elif mem_addr == 0x80002000: write_data = 0
+                                elif mem_addr == 0x80002004: write_data = self.mmio_regs.get(0x80002004, 0)
+                                elif mem_addr == 0x80002008: write_data = self.mmio_regs.get(0x80002008, 0)
+                                elif mem_addr == 0x8000200C: write_data = self.mem_vis_retired_count & 0xFFFFFFFF
+                                elif mem_addr == 0x80002010: write_data = self.branch_taken_count & 0xFFFFFFFF
+                                elif mem_addr == 0x80002014: write_data = self.load_use_stall_count & 0xFFFFFFFF
+                                elif mem_addr == 0x80002018: write_data = self.div_busy_cycles & 0xFFFFFFFF
+                                elif mem_addr == 0x8000201C: write_data = self.pipeline_stall_count & 0xFFFFFFFF
+                                elif mem_addr == 0x80002020: write_data = self.mem_vis_last_commit_pc & 0xFFFFFFFF
+                                elif mem_addr == 0x80002024: write_data = self.mmio_regs.get(0x80002024, 0)
+                                elif mem_addr == 0x80002100: write_data = self.sec_status
+                                elif mem_addr == 0x80002104: write_data = self.sec_pc
+                                elif mem_addr == 0x80002108: write_data = self.sec_addr
+                                elif mem_addr == 0x8000210C: write_data = self.sec_info
+                                elif mem_addr == 0x80002110: write_data = self.sec_context
+                                else:
+                                    mem_read = False; reg_write = False
+                            else:
+                                mem_read = False; reg_write = False
+                        elif mem_addr < len(self.memory) and not misaligned: # RAM
+                            mem_read = True; reg_write = True
+                            if f3 == 0: write_data = self.to_signed(self.memory[mem_addr], 8) & 0xFFFFFFFF
+                            elif f3 == 1: write_data = int.from_bytes(self.memory[mem_addr:mem_addr+2], 'little', signed=True) & 0xFFFFFFFF
+                            elif f3 == 2: write_data = int.from_bytes(self.memory[mem_addr:mem_addr+4], 'little', signed=False)
+                        else:
+                            mem_read = False; reg_write = False
+                    else:
+                        mem_read = False; reg_write = False
+                        telem_valid = False
+
+                else: # Protected Store (CSB, CSH, CSW)
+                    mem_write_req = True
+                    mem_addr = eff_addr
+                    mem_write_data = val2
+                    is_half = (f3 == 1)
+                    is_word = (f3 == 2)
+                    misaligned = (is_half and (mem_addr & 1 != 0)) or (is_word and (mem_addr & 3 != 0))
+                    telem_valid = True; telem_cla = True; telem_res = mem_addr
+                    if cap_allowed:
+                        if (mem_addr >> 16) == 0x8000: # MMIO
+                            if is_word and not misaligned:
+                                if mem_addr == 0x80002004:
+                                    self.mmio_regs[0x80002004] = val2 & 0xFFFFFFFF
+                                    mem_write = True
+                                elif mem_addr == 0x80002008:
+                                    self.mmio_regs[0x80002008] = val2 & 0xFFFFFFFF
+                                    mem_write = True
+                                elif mem_addr == 0x80002024:
+                                    self.mmio_regs[0x80002024] = val2 & 0xFFFFFFFF
+                                    mem_write = True
+                                elif mem_addr == 0x80002100:
+                                    if val2 & 1:
+                                        self.sec_status = 0
+                                    mem_write = True
+                                else:
+                                    mem_write = False
+                            else:
+                                mem_write = False
+                        elif mem_addr < len(self.memory) and not misaligned: # RAM
+                            mem_write = True
+                            if f3 == 0: self.memory[mem_addr] = val2 & 0xFF
+                            elif f3 == 1 and mem_addr + 2 <= len(self.memory): self.memory[mem_addr:mem_addr+2] = (val2 & 0xFFFF).to_bytes(2, 'little')
+                            elif f3 == 2 and mem_addr + 4 <= len(self.memory): self.memory[mem_addr:mem_addr+4] = (val2 & 0xFFFFFFFF).to_bytes(4, 'little')
+                            else: mem_write = False
+                        else:
+                            mem_write = False
+                    else:
+                        mem_write = False
+                        telem_valid = False
 
         else:
             illegal = True

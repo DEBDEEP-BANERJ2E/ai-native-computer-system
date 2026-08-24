@@ -103,4 +103,41 @@ class HazardUnitSpec extends AnyFlatSpec with ChiselScalatestTester with Matcher
       dut.io.flushIDEX.expect(true.B) // Flush wrong-path ID/EX
     }
   }
+
+  it should "detect Capability RAW hazard when producer is in ID/EX or EX/MEM, but NOT for c0" in {
+    test(new HazardUnit) { dut =>
+      // Consumer in ID uses cs1 = c3
+      dut.io.idValid.poke(true.B)
+      dut.io.idCs1.poke(3.U)
+      dut.io.idUsesCapRs1.poke(true.B)
+      dut.io.idUsesRs1.poke(false.B)
+      dut.io.idUsesRs2.poke(false.B)
+
+      // Producer in ID/EX writes to capRd = c3
+      dut.io.idExValid.poke(true.B)
+      dut.io.idExCapRegWrite.poke(true.B)
+      dut.io.idExCapRd.poke(3.U)
+      dut.io.exMemValid.poke(false.B)
+      dut.io.branchTaken.poke(false.B)
+
+      dut.io.capHazard.expect(true.B)
+      dut.io.stallIF.expect(true.B)
+      dut.io.stallID.expect(true.B)
+
+      // Producer in EX/MEM writes to capRd = c3
+      dut.io.idExValid.poke(false.B)
+      dut.io.exMemValid.poke(true.B)
+      dut.io.exMemCapRegWrite.poke(true.B)
+      dut.io.exMemCapRd.poke(3.U)
+
+      dut.io.capHazard.expect(true.B)
+      dut.io.stallIF.expect(true.B)
+
+      // Consumer uses c0 (NULL) -> never stalls!
+      dut.io.idCs1.poke(0.U)
+      dut.io.exMemCapRd.poke(0.U)
+      dut.io.capHazard.expect(false.B)
+      dut.io.stallIF.expect(false.B)
+    }
+  }
 }

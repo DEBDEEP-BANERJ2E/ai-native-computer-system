@@ -72,6 +72,17 @@ object MOp {
   val REMU   = 8.U(4.W) // Unsigned remainder
 }
 
+object CapOp {
+  val NONE       = 0.U(4.W)
+  val CSETBOUNDS = 1.U(4.W)
+  val CANDPERM   = 2.U(4.W)
+  val CINCOFFSET = 3.U(4.W)
+  val CGETBASE   = 4.U(4.W)
+  val CGETLEN    = 5.U(4.W)
+  val CGETTAG    = 6.U(4.W)
+  val CGETPERM   = 7.U(4.W)
+}
+
 class ControlSignalsBundle extends Bundle {
   val aluOp              = UInt(4.W)
   val aluSrcA            = UInt(2.W)
@@ -86,5 +97,12 @@ class ControlSignalsBundle extends Bundle {
   val isMul              = Bool()
   val mOp                = UInt(4.W)
   val isSecurityOp       = Bool()
+  val isCapOp            = Bool()
+  val capOp              = UInt(4.W)
+  val isCapMem           = Bool()
+  val capRegWrite        = Bool()
+  val usesCapRs1         = Bool()
+  val usesIntRs1         = Bool()
+  val usesIntRs2         = Bool()
   val illegalInstruction = Bool()
 }

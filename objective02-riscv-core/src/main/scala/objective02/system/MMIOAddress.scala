@@ -26,6 +26,7 @@ object MMIOAddress {
   val DIV_BUSY_CYCLES         = "h80002018".U(32.W) // RO, Count of divider busy cycles
   val PIPELINE_STALL_COUNT    = "h8000201c".U(32.W) // RO, Count of total frontend stall cycles
   val LAST_COMMIT_PC          = "h80002020".U(32.W) // RO, PC of most recently retired instruction
+  val CURRENT_CONTEXT         = "h80002024".U(32.W) // RW, Active OS/thread context ID (Reset 0)
 
   // =========================================================================
   // 3. Objective 2 Security Event Logger Window (0x80002100 - 0x80002110)

@@ -740,4 +740,349 @@ class PipelinedCoreSpec extends AnyFlatSpec with ChiselScalatestTester with Matc
       retiredVals.last shouldBe 8
     }
   }
+
+  // =============================================================
+  // Phase 7: CapabilityLite Architectural Integration Tests (Programs A - F)
+  // =============================================================
+
+  // Capability instruction helper encoders:
+  def encodeR(funct7: Int, rs2: Int, rs1: Int, funct3: Int, rd: Int, opcode: Int): BigInt = {
+    val word = (BigInt(funct7 & 0x7F) << 25) | (BigInt(rs2 & 0x1F) << 20) | (BigInt(rs1 & 0x1F) << 15) | (BigInt(funct3 & 0x7) << 12) | (BigInt(rd & 0x1F) << 7) | BigInt(opcode & 0x7F)
+    word & BigInt("FFFFFFFF", 16)
+  }
+  def encodeI(imm: Int, rs1: Int, funct3: Int, rd: Int, opcode: Int): BigInt = {
+    val imm12 = imm & 0xFFF
+    val word = (BigInt(imm12) << 20) | (BigInt(rs1 & 0x1F) << 15) | (BigInt(funct3 & 0x7) << 12) | (BigInt(rd & 0x1F) << 7) | BigInt(opcode & 0x7F)
+    word & BigInt("FFFFFFFF", 16)
+  }
+  def encodeS(imm: Int, rs2: Int, rs1: Int, funct3: Int, opcode: Int): BigInt = {
+    val imm12 = imm & 0xFFF
+    val imm11_5 = (imm12 >> 5) & 0x7F
+    val imm4_0 = imm12 & 0x1F
+    val word = (BigInt(imm11_5) << 25) | (BigInt(rs2 & 0x1F) << 20) | (BigInt(rs1 & 0x1F) << 15) | (BigInt(funct3 & 0x7) << 12) | (BigInt(imm4_0) << 7) | BigInt(opcode & 0x7F)
+    word & BigInt("FFFFFFFF", 16)
+  }
+  def encodeU(imm20: Int, rd: Int, opcode: Int): BigInt = {
+    val word = (BigInt(imm20 & 0xFFFFF) << 12) | (BigInt(rd & 0x1F) << 7) | BigInt(opcode & 0x7F)
+    word & BigInt("FFFFFFFF", 16)
+  }
+
+  // Capability manipulation: OP_CAP = 0x0B
+  def csetbounds(cd: Int, cs1: Int, rs2: Int): BigInt = encodeR(0x00, rs2, cs1, 0x0, cd, 0x0B)
+  def candperm(cd: Int, cs1: Int, rs2: Int): BigInt   = encodeR(0x00, rs2, cs1, 0x1, cd, 0x0B)
+  def cincoffset(cd: Int, cs1: Int, rs2: Int): BigInt = encodeR(0x00, rs2, cs1, 0x2, cd, 0x0B)
+  def cgetbase(rd: Int, cs1: Int): BigInt             = encodeR(0x00, 0, cs1, 0x3, rd, 0x0B)
+  def cgetlen(rd: Int, cs1: Int): BigInt              = encodeR(0x00, 0, cs1, 0x4, rd, 0x0B)
+  def cgettag(rd: Int, cs1: Int): BigInt              = encodeR(0x00, 0, cs1, 0x5, rd, 0x0B)
+  def cgetperm(rd: Int, cs1: Int): BigInt             = encodeR(0x00, 0, cs1, 0x6, rd, 0x0B)
+
+  // Capability memory: OP_CAP_MEM = 0x2B
+  def clb(rd: Int, cs1: Int, offset: Int): BigInt = encodeI(offset, cs1, 0x0, rd, 0x2B)
+  def clh(rd: Int, cs1: Int, offset: Int): BigInt = encodeI(offset, cs1, 0x1, rd, 0x2B)
+  def clw(rd: Int, cs1: Int, offset: Int): BigInt = encodeI(offset, cs1, 0x2, rd, 0x2B)
+  def csb(rs2: Int, cs1: Int, offset: Int): BigInt = encodeS(offset, rs2, cs1, 0x4, 0x2B)
+  def csh(rs2: Int, cs1: Int, offset: Int): BigInt = encodeS(offset, rs2, cs1, 0x5, 0x2B)
+  def csw(rs2: Int, cs1: Int, offset: Int): BigInt = encodeS(offset, rs2, cs1, 0x6, 0x2B)
+
+  // Standard RV32I helpers
+  def addi(rd: Int, rs1: Int, imm: Int): BigInt = encodeI(imm, rs1, 0x0, rd, 0x13)
+  def lui(rd: Int, imm20: Int): BigInt          = encodeU(imm20, rd, 0x37)
+  def lw(rd: Int, rs1: Int, offset: Int): BigInt = encodeI(offset, rs1, 0x2, rd, 0x03)
+  def sw(rs2: Int, rs1: Int, offset: Int): BigInt = encodeS(offset, rs2, rs1, 0x2, 0x23)
+
+  // -------------------------------------------------------------
+  // Test 19: Program A - Buffer Overflow Containment & Bounds Enforcement
+  // -------------------------------------------------------------
+  it should "execute Program A: allow in-bounds CSW, deny out-of-bounds CSW, and record exact violation metadata" in {
+    val progA = Seq(
+      addi(5, 0, 0x100),       // 0x00: addi x5, x0, 0x100 (cursor offset = 0x100)
+      cincoffset(3, 1, 5),     // 0x04: cincoffset c3, c1, x5 (c3.offset = 0x100)
+      addi(6, 0, 16),          // 0x08: addi x6, x0, 16 (length = 16)
+      csetbounds(3, 3, 6),     // 0x0C: csetbounds c3, c3, x6 (c3 = base:0x100, len:16, perms:RW, offset:0)
+      addi(7, 0, 0x11),        // 0x10: addi x7, x0, 0x11
+      csw(7, 3, 0),            // 0x14: csw x7, 0(c3) (store 0x11 to [0x100..0x103] -> allowed!)
+      addi(8, 0, 0x22),        // 0x18: addi x8, x0, 0x22
+      csw(8, 3, 12),           // 0x1C: csw x8, 12(c3) (store 0x22 to [0x10C..0x10F] -> allowed!)
+      addi(9, 0, 0x33),        // 0x20: addi x9, x0, 0x33
+      csw(9, 3, 13),           // 0x24: csw x9, 13(c3) (store to [0x10D..0x110] -> DENIED: BOUNDS!)
+      clw(11, 3, 0),           // 0x28: clw x11, 0(c3) (readback offset 0 -> 0x11)
+      clw(12, 3, 12),          // 0x2C: clw x12, 12(c3) (readback offset 12 -> 0x22)
+      lui(10, 0x80002),        // 0x30: lui x10, 0x80002
+      lw(13, 10, 0x100),       // 0x34: lw x13, 0x100(x10) (read SEC_STATUS @ 0x80002100)
+      lw(14, 10, 0x10C),       // 0x38: lw x14, 0x10C(x10) (read SEC_INFO @ 0x8000210C)
+      lw(15, 10, 0x108),       // 0x3C: lw x15, 0x108(x10) (read SEC_ADDR @ 0x80002108)
+      lw(16, 10, 0x104)        // 0x40: lw x16, 0x104(x10) (read SEC_PC @ 0x80002104)
+    )
+
+    test(new PipelinedCore(initialProgram = progA)) { dut =>
+      val expectedPcs = (0 until progA.length).map(i => BigInt(i * 4))
+      val retiredPcs = scala.collection.mutable.ArrayBuffer[BigInt]()
+      val retiredVals = scala.collection.mutable.ArrayBuffer[BigInt]()
+      val trace = scala.collection.mutable.ArrayBuffer[String]()
+
+      var cycles = 0
+      while (retiredPcs.length < expectedPcs.length && cycles < 200) {
+        val ret = captureRetirementEvent(dut)
+        if (ret.isDefined) {
+          retiredPcs += dut.io.commit.pc.peek().litValue
+          retiredVals += dut.io.commit.writeData.peek().litValue
+          trace += ret.get
+        }
+        dut.clock.step(1)
+        cycles += 1
+      }
+      val finalRet = captureRetirementEvent(dut)
+      if (finalRet.isDefined) {
+        retiredPcs += dut.io.commit.pc.peek().litValue
+        retiredVals += dut.io.commit.writeData.peek().litValue
+        trace += finalRet.get
+      }
+      recordPipelineTrace("progA_capability_bounds", trace)
+
+      retiredPcs shouldBe expectedPcs
+      // In-bounds load results
+      retiredVals(10) shouldBe 0x11 // x11 = 0x11
+      retiredVals(11) shouldBe 0x22 // x12 = 0x22
+      // Security Logger registers:
+      retiredVals(13) shouldBe 1              // x13 = SEC_STATUS (pending = 1)
+      retiredVals(14) shouldBe ((1 << 4) | 2) // x14 = SEC_INFO (accessType=WRITE=1, reason=BOUNDS=2)
+      retiredVals(15) shouldBe 0x10D          // x15 = SEC_ADDR (0x10D)
+      retiredVals(16) shouldBe 0x24           // x16 = SEC_PC (0x24 offending instruction PC)
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Test 20: Program B - Permission Attenuation & Monotonicity
+  // -------------------------------------------------------------
+  it should "execute Program B: enforce read-only permission attenuation and prohibit privilege escalation" in {
+    val progB = Seq(
+      addi(5, 0, 1),           // 0x00: addi x5, x0, 1 (READ permission mask = 1)
+      candperm(3, 1, 5),       // 0x04: candperm c3, c1, x5 (c3 becomes Read-Only)
+      clw(6, 3, 0),            // 0x08: clw x6, 0(c3) (load allowed)
+      addi(7, 0, 99),          // 0x0C: addi x7, x0, 99
+      csw(7, 3, 0),            // 0x10: csw x7, 0(c3) (store DENIED: WRITE_PERMISSION = 4!)
+      addi(8, 0, 3),           // 0x14: addi x8, x0, 3 (try to escalate to READ|WRITE)
+      candperm(3, 3, 8),       // 0x18: candperm c3, c3, x8 (monotonic AND: 1 & 3 = 1 -> still RO!)
+      cgetperm(9, 3),          // 0x1C: cgetperm x9, c3 (x9 should be 1)
+      lui(10, 0x80002),        // 0x20: lui x10, 0x80002
+      lw(13, 10, 0x100),       // 0x24: lw x13, 0x100(x10) (read SEC_STATUS @ 0x80002100)
+      lw(14, 10, 0x10C),       // 0x28: lw x14, 0x10C(x10) (read SEC_INFO @ 0x8000210C)
+      lw(15, 10, 0x108),       // 0x2C: lw x15, 0x108(x10) (read SEC_ADDR @ 0x80002108)
+      lw(16, 10, 0x104)        // 0x30: lw x16, 0x104(x10) (read SEC_PC @ 0x80002104)
+    )
+
+    test(new PipelinedCore(initialProgram = progB)) { dut =>
+      val expectedPcs = (0 until progB.length).map(i => BigInt(i * 4))
+      val retiredPcs = scala.collection.mutable.ArrayBuffer[BigInt]()
+      val retiredVals = scala.collection.mutable.ArrayBuffer[BigInt]()
+      val trace = scala.collection.mutable.ArrayBuffer[String]()
+
+      var cycles = 0
+      while (retiredPcs.length < expectedPcs.length && cycles < 200) {
+        val ret = captureRetirementEvent(dut)
+        if (ret.isDefined) {
+          retiredPcs += dut.io.commit.pc.peek().litValue
+          retiredVals += dut.io.commit.writeData.peek().litValue
+          trace += ret.get
+        }
+        dut.clock.step(1)
+        cycles += 1
+      }
+      val finalRet = captureRetirementEvent(dut)
+      if (finalRet.isDefined) {
+        retiredPcs += dut.io.commit.pc.peek().litValue
+        retiredVals += dut.io.commit.writeData.peek().litValue
+        trace += finalRet.get
+      }
+      recordPipelineTrace("progB_capability_perms", trace)
+
+      retiredPcs shouldBe expectedPcs
+      retiredVals(7)  shouldBe 1              // x9 = cgetperm (perms = 1)
+      retiredVals(9)  shouldBe 1              // x13 = SEC_STATUS (pending = 1)
+      retiredVals(10) shouldBe ((1 << 4) | 4) // x14 = SEC_INFO (accessType=WRITE=1, reason=WRITE_PERMISSION=4)
+      retiredVals(11) shouldBe 0x0            // x15 = SEC_ADDR (0x0)
+      retiredVals(12) shouldBe 0x10           // x16 = SEC_PC (0x10 offending instruction PC)
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Test 21: Program C - Invalid / NULL Capability Dereference
+  // -------------------------------------------------------------
+  it should "execute Program C: deny memory operations through NULL / tag=0 capability" in {
+    val progC = Seq(
+      addi(5, 0, 77),          // 0x00: addi x5, x0, 77
+      csw(5, 0, 0),            // 0x04: csw x5, 0(c0) (store via c0 [NULL] -> DENIED: INVALID_CAPABILITY = 1)
+      clw(6, 4, 0),            // 0x08: clw x6, 0(c4) (load via c4 [NULL, tag=0] -> DENIED: INVALID_CAPABILITY)
+      lui(10, 0x80002),        // 0x0C: lui x10, 0x80002
+      lw(13, 10, 0x100),       // 0x10: lw x13, 0x100(x10) (read SEC_STATUS @ 0x80002100)
+      lw(14, 10, 0x10C),       // 0x14: lw x14, 0x10C(x10) (read SEC_INFO @ 0x8000210C)
+      lw(15, 10, 0x108),       // 0x18: lw x15, 0x108(x10) (read SEC_ADDR @ 0x80002108)
+      lw(16, 10, 0x104)        // 0x1C: lw x16, 0x104(x10) (read SEC_PC @ 0x80002104)
+    )
+
+    test(new PipelinedCore(initialProgram = progC)) { dut =>
+      val expectedPcs = (0 until progC.length).map(i => BigInt(i * 4))
+      val retiredPcs = scala.collection.mutable.ArrayBuffer[BigInt]()
+      val retiredVals = scala.collection.mutable.ArrayBuffer[BigInt]()
+      val trace = scala.collection.mutable.ArrayBuffer[String]()
+
+      var cycles = 0
+      while (retiredPcs.length < expectedPcs.length && cycles < 200) {
+        val ret = captureRetirementEvent(dut)
+        if (ret.isDefined) {
+          retiredPcs += dut.io.commit.pc.peek().litValue
+          retiredVals += dut.io.commit.writeData.peek().litValue
+          trace += ret.get
+        }
+        dut.clock.step(1)
+        cycles += 1
+      }
+      val finalRet = captureRetirementEvent(dut)
+      if (finalRet.isDefined) {
+        retiredPcs += dut.io.commit.pc.peek().litValue
+        retiredVals += dut.io.commit.writeData.peek().litValue
+        trace += finalRet.get
+      }
+      recordPipelineTrace("progC_capability_null", trace)
+
+      retiredPcs shouldBe expectedPcs
+      retiredVals(4) shouldBe 1              // x13 = SEC_STATUS (pending = 1)
+      retiredVals(5) shouldBe ((1 << 4) | 1) // x14 = SEC_INFO (accessType=WRITE=1, reason=INVALID_CAPABILITY=1)
+      retiredVals(6) shouldBe 0x0            // x15 = SEC_ADDR (0x0)
+      retiredVals(7) shouldBe 0x04           // x16 = SEC_PC (0x04 offending instruction PC)
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Test 22: Program D - Capability RAW Hazards and Zero-NOP Interlock
+  // -------------------------------------------------------------
+  it should "execute Program D: resolve back-to-back capability derivation RAW hazards with zero NOPs" in {
+    val progD = Seq(
+      addi(5, 0, 64),          // 0x00: addi x5, x0, 64
+      csetbounds(3, 1, 5),     // 0x04: csetbounds c3, c1, x5 (c3 derived)
+      addi(6, 0, 123),         // 0x08: addi x6, x0, 123 (0 NOPs!)
+      csw(6, 3, 0),            // 0x0C: csw x6, 0(c3) (uses c3 -> pipeline stalls and forwards c3)
+      clw(7, 3, 0)             // 0x10: clw x7, 0(c3) (load back into x7)
+    )
+
+    test(new PipelinedCore(initialProgram = progD)) { dut =>
+      val expectedPcs = (0 until progD.length).map(i => BigInt(i * 4))
+      val retiredPcs = scala.collection.mutable.ArrayBuffer[BigInt]()
+      val retiredVals = scala.collection.mutable.ArrayBuffer[BigInt]()
+      val trace = scala.collection.mutable.ArrayBuffer[String]()
+
+      var cycles = 0
+      while (retiredPcs.length < expectedPcs.length && cycles < 200) {
+        val ret = captureRetirementEvent(dut)
+        if (ret.isDefined) {
+          retiredPcs += dut.io.commit.pc.peek().litValue
+          retiredVals += dut.io.commit.writeData.peek().litValue
+          trace += ret.get
+        }
+        dut.clock.step(1)
+        cycles += 1
+      }
+      val finalRet = captureRetirementEvent(dut)
+      if (finalRet.isDefined) {
+        retiredPcs += dut.io.commit.pc.peek().litValue
+        retiredVals += dut.io.commit.writeData.peek().litValue
+        trace += finalRet.get
+      }
+      recordPipelineTrace("progD_capability_raw", trace)
+
+      retiredPcs shouldBe expectedPcs
+      retiredVals(4) shouldBe 123 // x7 loaded 123 from c3 with zero NOP stalls
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Test 23: Program E - Protected MMIO Authorization & Layer Separation
+  // -------------------------------------------------------------
+  it should "execute Program E: permit valid capability MMIO and isolate device-level write protection" in {
+    val progE = Seq(
+      lui(9, 2),               // 0x00: lui x9, 2 (x9 = 0x2000)
+      cincoffset(3, 2, 9),     // 0x04: cincoffset c3, c2, x9 (c3 cursor = 0x80002000)
+      addi(5, 0, 42),          // 0x08: addi x5, x0, 42
+      csw(5, 3, 4),            // 0x0C: csw x5, 4(c3) (write 42 to PROCESS_BEHAVIOR_CLASS @ 0x80002004 -> succeeds!)
+      clw(6, 3, 4),            // 0x10: clw x6, 4(c3) (read back -> 42)
+      addi(7, 0, 999),         // 0x14: addi x7, x0, 999
+      csw(7, 3, 0x0C),         // 0x18: csw x7, 0x0C(c3) (store to RETIRED_COUNT: cap allows, MMIO suppresses write!)
+      lui(10, 0x80002),        // 0x1C: lui x10, 0x80002
+      lw(8, 10, 0x100)         // 0x20: lw x8, 0x100(x10) (read SEC_STATUS @ 0x80002100 -> 0, no capability violation!)
+    )
+
+    test(new PipelinedCore(initialProgram = progE)) { dut =>
+      val expectedPcs = (0 until progE.length).map(i => BigInt(i * 4))
+      val retiredPcs = scala.collection.mutable.ArrayBuffer[BigInt]()
+      val retiredVals = scala.collection.mutable.ArrayBuffer[BigInt]()
+      val trace = scala.collection.mutable.ArrayBuffer[String]()
+
+      var cycles = 0
+      while (retiredPcs.length < expectedPcs.length && cycles < 200) {
+        val ret = captureRetirementEvent(dut)
+        if (ret.isDefined) {
+          retiredPcs += dut.io.commit.pc.peek().litValue
+          retiredVals += dut.io.commit.writeData.peek().litValue
+          trace += ret.get
+        }
+        dut.clock.step(1)
+        cycles += 1
+      }
+      val finalRet = captureRetirementEvent(dut)
+      if (finalRet.isDefined) {
+        retiredPcs += dut.io.commit.pc.peek().litValue
+        retiredVals += dut.io.commit.writeData.peek().litValue
+        trace += finalRet.get
+      }
+      recordPipelineTrace("progE_capability_mmio", trace)
+
+      retiredPcs shouldBe expectedPcs
+      retiredVals(4) shouldBe 42 // x6 = 42
+      retiredVals(8) shouldBe 0  // x8 = SEC_STATUS (0 = no capability violation)
+      dut.io.processBehaviorClass.peek().litValue shouldBe 42
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Test 24: Program F - Combined GPR and Capability Dependency Interaction
+  // -------------------------------------------------------------
+  it should "execute Program F: correctly handle mixed GPR forwarding and capability derivation dependencies" in {
+    val progF = Seq(
+      addi(5, 0, 16),          // 0x00: addi x5, x0, 16
+      csetbounds(3, 1, 5),     // 0x04: csetbounds c3, c1, x5 (forwarded x5 into csetbounds)
+      addi(6, 0, 99),          // 0x08: addi x6, x0, 99
+      csw(6, 3, 0),            // 0x0C: csw x6, 0(c3) (forwarded c3 and forwarded x6)
+      clw(7, 3, 0)             // 0x10: clw x7, 0(c3) (load back into x7)
+    )
+
+    test(new PipelinedCore(initialProgram = progF)) { dut =>
+      val expectedPcs = (0 until progF.length).map(i => BigInt(i * 4))
+      val retiredPcs = scala.collection.mutable.ArrayBuffer[BigInt]()
+      val retiredVals = scala.collection.mutable.ArrayBuffer[BigInt]()
+      val trace = scala.collection.mutable.ArrayBuffer[String]()
+
+      var cycles = 0
+      while (retiredPcs.length < expectedPcs.length && cycles < 200) {
+        val ret = captureRetirementEvent(dut)
+        if (ret.isDefined) {
+          retiredPcs += dut.io.commit.pc.peek().litValue
+          retiredVals += dut.io.commit.writeData.peek().litValue
+          trace += ret.get
+        }
+        dut.clock.step(1)
+        cycles += 1
+      }
+      val finalRet = captureRetirementEvent(dut)
+      if (finalRet.isDefined) {
+        retiredPcs += dut.io.commit.pc.peek().litValue
+        retiredVals += dut.io.commit.writeData.peek().litValue
+        trace += finalRet.get
+      }
+      recordPipelineTrace("progF_capability_gpr_forwarding", trace)
+
+      retiredPcs shouldBe expectedPcs
+      retiredVals(4) shouldBe 99 // x7 = 99
+    }
+  }
 }
+
