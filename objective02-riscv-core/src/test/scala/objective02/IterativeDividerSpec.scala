@@ -89,5 +89,31 @@ class IterativeDividerSpec extends AnyFreeSpec with ChiselScalatestTester with M
         }
       }
     }
+
+    "should immediately abort computation and return to idle when killed" in {
+      test(new IterativeDivider) { dut =>
+        dut.io.dividend.poke(100.U)
+        dut.io.divisor.poke(7.U)
+        dut.io.isSigned.poke(false.B)
+        dut.io.kill.poke(false.B)
+        dut.io.start.poke(true.B)
+        dut.clock.step(1)
+        dut.io.start.poke(false.B)
+
+        // Step a few cycles into computation
+        dut.clock.step(5)
+        dut.io.busy.expect(true.B)
+        dut.io.done.expect(false.B)
+
+        // Assert kill
+        dut.io.kill.poke(true.B)
+        dut.clock.step(1)
+        dut.io.kill.poke(false.B)
+
+        // Must be back in idle immediately with busy=false and done=false
+        dut.io.busy.expect(false.B)
+        dut.io.done.expect(false.B)
+      }
+    }
   }
 }

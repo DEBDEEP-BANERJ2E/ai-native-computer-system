@@ -81,6 +81,8 @@ object CapOp {
   val CGETLEN    = 5.U(4.W)
   val CGETTAG    = 6.U(4.W)
   val CGETPERM   = 7.U(4.W)
+  val CGETOFFSET = 8.U(4.W)
+  val CCLEAR     = 9.U(4.W)
 }
 
 class ControlSignalsBundle extends Bundle {

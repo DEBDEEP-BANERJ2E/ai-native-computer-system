@@ -38,6 +38,16 @@ class SystemMMIOIO extends Bundle {
 
   // Hardware security violation event interface
   val securityEvent          = Input(new SecurityViolationEvent)
+
+  // Objective 2 Phase 8 Precise Trap Interface
+  val trapEnable             = Output(Bool())
+  val trapActive             = Output(Bool())
+  val trapVector             = Output(UInt(32.W))
+  val trapEpc                = Output(UInt(32.W))
+  val takeTrapReturn         = Output(Bool())
+  val trapDoubleFault        = Output(Bool())
+  val trapCause              = Output(UInt(32.W))
+  val trapAddr               = Output(UInt(32.W))
 }
 
 class SystemMMIO extends Module {
@@ -90,7 +100,7 @@ class SystemMMIO extends Module {
   }
 
   // =========================================================================
-  // 4. Address Decoding & Data Isolation
+  // 3. Address Decoding & Alignment
   // =========================================================================
   val windowHit = (io.address(31, 16) === "h8000".U)
   io.windowHit := windowHit
@@ -98,7 +108,7 @@ class SystemMMIO extends Module {
   val isAlignedWord = (io.address(1, 0) === 0.U) && (io.memWidth === MemWidth.WORD)
 
   // =========================================================================
-  // 3. Security Event Sticky Logger Window
+  // 4. Security Event Sticky Logger Window (Phase 6 Audit Trail)
   // =========================================================================
   val secPendingReg    = RegInit(false.B)
   val secPcReg         = RegInit(0.U(32.W))
@@ -124,10 +134,61 @@ class SystemMMIO extends Module {
     secContextReg    := io.securityEvent.context
   }
 
-  // Default values
-  val readDataWire     = WireDefault(0.U(32.W))
-  val readAcceptedWire = WireDefault(false.B)
-  val writeAcceptedWire= WireDefault(false.B)
+  // =========================================================================
+  // 5. Objective 2 Phase 8 Dedicated Architectural Trap State Machine
+  // =========================================================================
+  val trapEnableReg      = RegInit(false.B)
+  val trapActiveReg      = RegInit(false.B)
+  val trapDoubleFaultReg = RegInit(false.B)
+  val trapVectorReg      = RegInit("h00000800".U(32.W))
+  val trapEpcReg         = RegInit(0.U(32.W))
+  val trapCauseReg       = RegInit(0.U(32.W))
+  val trapAddrReg        = RegInit(0.U(32.W))
+  val trapContextReg     = RegInit(0.U(32.W))
+
+  // Combinational trap trigger condition from current MEM-stage fault
+  val takePreciseTrap = io.securityEvent.valid && trapEnableReg && !trapActiveReg
+  val nestedFault     = io.securityEvent.valid && trapEnableReg && trapActiveReg
+
+  // Trap Return Command: SW writes 1 to TRAP_RETURN (0x80002130) while ACTIVE=1
+  val trapReturnReq  = isAlignedWord && io.memWriteReq && (io.address === MMIOAddress.TRAP_RETURN) && (io.writeData(0) === 1.U) && trapActiveReg
+  val takeTrapReturn = trapReturnReq
+
+  // W1C on TRAP_STATUS.DOUBLE_FAULT (bit 1)
+  val w1cDoubleFault = isAlignedWord && io.memWriteReq && (io.address === MMIOAddress.TRAP_STATUS) && (io.writeData(1) === 1.U)
+
+  when(w1cDoubleFault) {
+    trapDoubleFaultReg := false.B
+  }
+  // New nested fault beats simultaneous W1C clear!
+  when(nestedFault) {
+    trapDoubleFaultReg := true.B
+  }
+
+  // Primary trap capture: latches fresh TRAP_* evidence when takePreciseTrap occurs
+  when(takePreciseTrap) {
+    trapActiveReg  := true.B
+    trapEpcReg     := io.securityEvent.pc
+    trapCauseReg   := Cat(0.U(26.W), io.securityEvent.accessType, io.securityEvent.reason)
+    trapAddrReg    := io.securityEvent.address
+    trapContextReg := io.securityEvent.context
+  }.elsewhen(takeTrapReturn) {
+    trapActiveReg  := false.B
+  }
+
+  io.trapEnable      := trapEnableReg
+  io.trapActive      := trapActiveReg
+  io.trapVector      := trapVectorReg
+  io.trapEpc         := trapEpcReg
+  io.takeTrapReturn  := takeTrapReturn
+  io.trapDoubleFault := trapDoubleFaultReg
+  io.trapCause       := trapCauseReg
+  io.trapAddr        := trapAddrReg
+
+  // Default bus response values
+  val readDataWire      = WireDefault(0.U(32.W))
+  val readAcceptedWire  = WireDefault(false.B)
+  val writeAcceptedWire = WireDefault(false.B)
 
   when(isAlignedWord) {
     // -----------------------------------------------------------------------
@@ -199,7 +260,7 @@ class SystemMMIO extends Module {
           readAcceptedWire := true.B
         }
 
-        // Objective 2 Security Event Logger Window
+        // Objective 2 Security Event Sticky Logger Window (Phase 6 Audit Trail)
         is(MMIOAddress.SEC_STATUS) {
           readDataWire     := Cat(0.U(31.W), secPendingReg)
           readAcceptedWire := true.B
@@ -218,6 +279,40 @@ class SystemMMIO extends Module {
         }
         is(MMIOAddress.SEC_CONTEXT) {
           readDataWire     := secContextReg
+          readAcceptedWire := true.B
+        }
+
+        // Objective 2 Phase 8 Dedicated Precise Trap Window
+        is(MMIOAddress.TRAP_CONTROL) {
+          readDataWire     := Cat(0.U(31.W), trapEnableReg)
+          readAcceptedWire := true.B
+        }
+        is(MMIOAddress.TRAP_STATUS) {
+          readDataWire     := Cat(0.U(30.W), trapDoubleFaultReg, trapActiveReg)
+          readAcceptedWire := true.B
+        }
+        is(MMIOAddress.TRAP_VECTOR) {
+          readDataWire     := trapVectorReg
+          readAcceptedWire := true.B
+        }
+        is(MMIOAddress.TRAP_EPC) {
+          readDataWire     := trapEpcReg
+          readAcceptedWire := true.B
+        }
+        is(MMIOAddress.TRAP_CAUSE) {
+          readDataWire     := trapCauseReg
+          readAcceptedWire := true.B
+        }
+        is(MMIOAddress.TRAP_ADDR) {
+          readDataWire     := trapAddrReg
+          readAcceptedWire := true.B
+        }
+        is(MMIOAddress.TRAP_CONTEXT) {
+          readDataWire     := trapContextReg
+          readAcceptedWire := true.B
+        }
+        is(MMIOAddress.TRAP_RETURN) {
+          readDataWire     := 0.U // Write-only
           readAcceptedWire := true.B
         }
       }
@@ -242,6 +337,26 @@ class SystemMMIO extends Module {
         }
         is(MMIOAddress.SEC_STATUS) {
           writeAcceptedWire := true.B
+        }
+        is(MMIOAddress.TRAP_CONTROL) {
+          trapEnableReg     := io.writeData(0)
+          writeAcceptedWire := true.B
+        }
+        is(MMIOAddress.TRAP_STATUS) {
+          writeAcceptedWire := true.B
+        }
+        is(MMIOAddress.TRAP_VECTOR) {
+          trapVectorReg     := io.writeData & "hFFFFFFFC".U(32.W) // 4-byte aligned
+          writeAcceptedWire := true.B
+        }
+        is(MMIOAddress.TRAP_EPC) {
+          when(trapActiveReg) {
+            trapEpcReg := io.writeData & "hFFFFFFFC".U(32.W) // writeable by handler while ACTIVE
+          }
+          writeAcceptedWire := true.B
+        }
+        is(MMIOAddress.TRAP_RETURN) {
+          writeAcceptedWire := true.B // Command store accepted and retires normally!
         }
       }
     }

@@ -26,6 +26,9 @@ object Opcodes {
   val FUNCT3_CGETLEN    = "b100".U(3.W) // CGETLEN rd, cs1
   val FUNCT3_CGETTAG    = "b101".U(3.W) // CGETTAG rd, cs1
   val FUNCT3_CGETPERM   = "b110".U(3.W) // CGETPERM rd, cs1
+  val FUNCT3_CEXT       = "b111".U(3.W) // Extended Capability Operations (sub-encoded via funct7)
+  val FUNCT7_CGETOFFSET = "b0000000".U(7.W) // CGETOFFSET rd, cs1
+  val FUNCT7_CCLEAR     = "b0000001".U(7.W) // CCLEAR cd
 
   // 3-bit Funct3 fields for Capability Memory Operations (OP_CAP_MEM = 0x2B)
   val FUNCT3_CLB = "b000".U(3.W) // CLB rd, offset(cs1)

@@ -389,4 +389,106 @@ class SystemMMIOSpec extends AnyFlatSpec with ChiselScalatestTester with Matcher
       dut.io.readData.expect(expectedInfo.U)
     }
   }
+
+  it should "support Phase 8 Dedicated Trap MMIO registers and precise trap state transitions" in {
+    test(new SystemMMIO) { dut =>
+      dut.io.memWidth.poke(MemWidth.WORD)
+
+      // 1. Initial State
+      dut.io.trapEnable.expect(false.B)
+      dut.io.trapActive.expect(false.B)
+      dut.io.trapVector.expect("h00000800".U)
+
+      // 2. Configure TRAP_VECTOR with misaligned value (must be masked with & 0xFFFFFFFC)
+      dut.io.memWriteReq.poke(true.B)
+      dut.io.address.poke(MMIOAddress.TRAP_VECTOR)
+      dut.io.writeData.poke("h00000103".U) // unaligned address
+      dut.clock.step(1)
+      dut.io.writeAccepted.expect(true.B)
+      dut.io.trapVector.expect("h00000100".U) // masked!
+
+      // 3. Enable Traps via TRAP_CONTROL
+      dut.io.address.poke(MMIOAddress.TRAP_CONTROL)
+      dut.io.writeData.poke(1.U)
+      dut.clock.step(1)
+      dut.io.writeAccepted.expect(true.B)
+      dut.io.trapEnable.expect(true.B)
+
+      // 4. Fire Security Event -> Primary Precise Trap
+      dut.io.memWriteReq.poke(false.B)
+      dut.io.securityEvent.valid.poke(true.B)
+      dut.io.securityEvent.pc.poke("h00000020".U)
+      dut.io.securityEvent.address.poke("h00002000".U)
+      dut.io.securityEvent.accessType.poke(AccessType.WRITE)
+      dut.io.securityEvent.reason.poke(SecurityReason.BOUNDS)
+      dut.io.securityEvent.context.poke("h0000000A".U)
+      dut.clock.step(1)
+      dut.io.securityEvent.valid.poke(false.B)
+
+      // Verify Trap State Captured
+      dut.io.trapActive.expect(true.B)
+      dut.io.trapEpc.expect("h00000020".U)
+      dut.io.trapCause.expect(((1 << 4) | 2).U) // WRITE (1), BOUNDS (2)
+      dut.io.trapAddr.expect("h00002000".U)
+
+      // 5. Nested Security Event while ACTIVE=1 -> DOUBLE_FAULT, no EPC overwrite
+      dut.io.securityEvent.valid.poke(true.B)
+      dut.io.securityEvent.pc.poke("h00000150".U)
+      dut.io.securityEvent.address.poke("h00003000".U)
+      dut.io.securityEvent.accessType.poke(AccessType.READ)
+      dut.io.securityEvent.reason.poke(SecurityReason.READ_PERMISSION)
+      dut.clock.step(1)
+      dut.io.securityEvent.valid.poke(false.B)
+
+      // Trap EPC and Addr must remain unchanged from primary trap
+      dut.io.trapEpc.expect("h00000020".U)
+      dut.io.trapAddr.expect("h00002000".U)
+
+      // Read TRAP_STATUS: ACTIVE=1, DOUBLE_FAULT=1 -> 3.U
+      dut.io.memReadReq.poke(true.B)
+      dut.io.address.poke(MMIOAddress.TRAP_STATUS)
+      dut.clock.step(1)
+      dut.io.readData.expect(3.U)
+
+      // 6. Test Double-Fault Priority over Simultaneous W1C Clear
+      dut.io.memReadReq.poke(false.B)
+      dut.io.memWriteReq.poke(true.B)
+      dut.io.address.poke(MMIOAddress.TRAP_STATUS)
+      dut.io.writeData.poke(2.U) // W1C clear on DOUBLE_FAULT bit
+
+      dut.io.securityEvent.valid.poke(true.B) // simultaneous new nested fault
+      dut.io.securityEvent.pc.poke("h00000160".U)
+      dut.io.securityEvent.address.poke("h00004000".U)
+      dut.io.securityEvent.accessType.poke(AccessType.WRITE)
+      dut.io.securityEvent.reason.poke(SecurityReason.WRITE_PERMISSION)
+      dut.clock.step(1)
+      dut.io.securityEvent.valid.poke(false.B)
+
+      // DOUBLE_FAULT must stay set!
+      dut.io.memWriteReq.poke(false.B)
+      dut.io.memReadReq.poke(true.B)
+      dut.io.address.poke(MMIOAddress.TRAP_STATUS)
+      dut.clock.step(1)
+      dut.io.readData.expect(3.U)
+
+      // 7. Handler writes updated TRAP_EPC (advance past fault)
+      dut.io.memReadReq.poke(false.B)
+      dut.io.memWriteReq.poke(true.B)
+      dut.io.address.poke(MMIOAddress.TRAP_EPC)
+      dut.io.writeData.poke("h00000027".U) // unaligned
+      dut.clock.step(1)
+      dut.io.trapEpc.expect("h00000024".U) // masked & 0xFFFFFFFC
+
+      // 8. Handler executes TRAP_RETURN command
+      dut.io.address.poke(MMIOAddress.TRAP_RETURN)
+      dut.io.writeData.poke(1.U)
+      dut.io.takeTrapReturn.expect(true.B)
+      dut.clock.step(1)
+
+      // ACTIVE is cleared, takeTrapReturn returns to false
+      dut.io.memWriteReq.poke(false.B)
+      dut.io.trapActive.expect(false.B)
+      dut.io.takeTrapReturn.expect(false.B)
+    }
+  }
 }

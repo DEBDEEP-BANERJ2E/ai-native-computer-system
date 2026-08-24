@@ -37,4 +37,17 @@ object MMIOAddress {
   val SEC_ADDR                = "h80002108".U(32.W) // RO, Offending memory address
   val SEC_INFO                = "h8000210c".U(32.W) // RO, [5:4] accessType, [3:0] reason
   val SEC_CONTEXT             = "h80002110".U(32.W) // RO, Process/scheduler context at violation
+
+  // =========================================================================
+  // 4. Objective 2 Phase 8 Precise Security Trapping Window (0x80002114 - 0x80002130)
+  // =========================================================================
+  val TRAP_CONTROL            = "h80002114".U(32.W) // RW, Bit 0: TRAP_ENABLE
+  val TRAP_STATUS             = "h80002118".U(32.W) // RW, Bit 0: ACTIVE (RO), Bit 1: DOUBLE_FAULT (W1C)
+  val TRAP_VECTOR             = "h8000211c".U(32.W) // RW, 4-byte aligned base PC of trap handler
+  val TRAP_EPC                = "h80002120".U(32.W) // RW, Offending instruction PC (writeable when ACTIVE)
+  val TRAP_CAUSE              = "h80002124".U(32.W) // RO, [5:4] accessType, [3:0] reason
+  val TRAP_ADDR               = "h80002128".U(32.W) // RO, Offending memory address
+  val TRAP_CONTEXT            = "h8000212c".U(32.W) // RO, Process context at trap
+  val TRAP_RETURN             = "h80002130".U(32.W) // WO, Write 1 to return from trap handler
 }
+

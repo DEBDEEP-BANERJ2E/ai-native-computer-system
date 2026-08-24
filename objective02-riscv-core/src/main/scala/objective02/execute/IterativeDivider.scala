@@ -5,6 +5,7 @@ import chisel3.util._
 
 class IterativeDividerIO extends Bundle {
   val start       = Input(Bool())
+  val kill        = Input(Bool())
   val dividend    = Input(UInt(32.W))
   val divisor     = Input(UInt(32.W))
   val isSigned    = Input(Bool())
@@ -67,61 +68,66 @@ class IterativeDivider extends Module {
   val isDivByZero = (io.divisor === 0.U)
   val isOverflow = io.isSigned && (io.dividend === "h80000000".U) && (io.divisor === "hFFFFFFFF".U)
 
-  switch(state) {
-    is(sIdle) {
-      when(io.start) {
-        qNeg := dividendSign ^ divisorSign
-        rNeg := dividendSign
+  when(io.kill) {
+    state := sIdle
+    count := 0.U
+  }.otherwise {
+    switch(state) {
+      is(sIdle) {
+        when(io.start) {
+          qNeg := dividendSign ^ divisorSign
+          rNeg := dividendSign
 
-        when(isDivByZero) {
-          finalQuotient := "hFFFFFFFF".U
-          finalRemainder := io.dividend
-          state := sDone
-        }.elsewhen(isOverflow) {
-          finalQuotient := "h80000000".U
-          finalRemainder := 0.U
-          state := sDone
-        }.otherwise {
-          aReg := 0.U
-          qReg := absDividend
-          mReg := Cat(0.U(1.W), absDivisor)
-          count := 32.U
-          state := sCompute
+          when(isDivByZero) {
+            finalQuotient := "hFFFFFFFF".U
+            finalRemainder := io.dividend
+            state := sDone
+          }.elsewhen(isOverflow) {
+            finalQuotient := "h80000000".U
+            finalRemainder := 0.U
+            state := sDone
+          }.otherwise {
+            aReg := 0.U
+            qReg := absDividend
+            mReg := Cat(0.U(1.W), absDivisor)
+            count := 32.U
+            state := sCompute
+          }
         }
       }
-    }
-    
-    is(sCompute) {
-      val shiftedA = Cat(aReg(31, 0), qReg(31))
-      val shiftedQ = Cat(qReg(30, 0), 0.U(1.W))
       
-      val subA = shiftedA - mReg
-      val isNeg = subA(32)
-
-      when(isNeg) {
-        // Restore
-        aReg := shiftedA
-        qReg := shiftedQ // Q[0] is already 0
-      }.otherwise {
-        // Don't restore
-        aReg := subA
-        qReg := shiftedQ | 1.U
-      }
-      
-      count := count - 1.U
-      when(count === 1.U) {
-        state := sDone
-        // Post-processing logic on transition to sDone
-        val qResult = Mux(isNeg, shiftedQ, shiftedQ | 1.U)
-        val rResult = Mux(isNeg, shiftedA, subA)(31, 0)
+      is(sCompute) {
+        val shiftedA = Cat(aReg(31, 0), qReg(31))
+        val shiftedQ = Cat(qReg(30, 0), 0.U(1.W))
         
-        finalQuotient := Mux(qNeg, (~qResult) + 1.U, qResult)
-        finalRemainder := Mux(rNeg, (~rResult) + 1.U, rResult)
-      }
-    }
+        val subA = shiftedA - mReg
+        val isNeg = subA(32)
 
-    is(sDone) {
-      state := sIdle
+        when(isNeg) {
+          // Restore
+          aReg := shiftedA
+          qReg := shiftedQ // Q[0] is already 0
+        }.otherwise {
+          // Don't restore
+          aReg := subA
+          qReg := shiftedQ | 1.U
+        }
+        
+        count := count - 1.U
+        when(count === 1.U) {
+          state := sDone
+          // Post-processing logic on transition to sDone
+          val qResult = Mux(isNeg, shiftedQ, shiftedQ | 1.U)
+          val rResult = Mux(isNeg, shiftedA, subA)(31, 0)
+          
+          finalQuotient := Mux(qNeg, (~qResult) + 1.U, qResult)
+          finalRemainder := Mux(rNeg, (~rResult) + 1.U, rResult)
+        }
+      }
+
+      is(sDone) {
+        state := sIdle
+      }
     }
   }
 }

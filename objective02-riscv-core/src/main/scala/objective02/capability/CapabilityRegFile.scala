@@ -39,11 +39,9 @@ class CapabilityRegFile(dmemSizeBytes: Int = 4096) extends Module {
   val c6Reg = RegInit(CapabilityLite.nullCapability())
   val c7Reg = RegInit(CapabilityLite.nullCapability())
 
-  // Write port at WB stage
-  when(io.wen && (io.waddr =/= 0.U)) {
+  // Write port at WB stage: c0 (NULL), c1 (RAM root), c2 (MMIO root) are hardware-immutable roots
+  when(io.wen && (io.waddr >= 3.U)) {
     switch(io.waddr) {
-      is(1.U) { c1Reg := io.wdata }
-      is(2.U) { c2Reg := io.wdata }
       is(3.U) { c3Reg := io.wdata }
       is(4.U) { c4Reg := io.wdata }
       is(5.U) { c5Reg := io.wdata }
@@ -65,7 +63,7 @@ class CapabilityRegFile(dmemSizeBytes: Int = 4096) extends Module {
     is(7.U) { regOut := c7Reg }
   }
 
-  // WB -> ID bypass
-  val bypassMatch = io.wen && (io.waddr =/= 0.U) && (io.waddr === io.raddr1)
+  // WB -> ID bypass (only applies to writable process capabilities c3..c7)
+  val bypassMatch = io.wen && (io.waddr >= 3.U) && (io.waddr === io.raddr1)
   io.rdata1 := Mux(bypassMatch, io.wdata, regOut)
 }

@@ -1,0 +1,123 @@
+FIRRTL version 1.2.0
+circuit IterativeDivider :
+  module IterativeDivider :
+    input clock : Clock
+    input reset : UInt<1>
+    output io : { flip start : UInt<1>, flip kill : UInt<1>, flip dividend : UInt<32>, flip divisor : UInt<32>, flip isSigned : UInt<1>, busy : UInt<1>, done : UInt<1>, quotient : UInt<32>, remainder : UInt<32>, iteration : UInt<6>} @[src/main/scala/objective02/execute/IterativeDivider.scala 22:14]
+
+    reg state : UInt<2>, clock with :
+      reset => (reset, UInt<2>("h0")) @[src/main/scala/objective02/execute/IterativeDivider.scala 26:22]
+    reg count : UInt<6>, clock with :
+      reset => (reset, UInt<6>("h0")) @[src/main/scala/objective02/execute/IterativeDivider.scala 27:22]
+    reg aReg : UInt<33>, clock with :
+      reset => (reset, UInt<33>("h0")) @[src/main/scala/objective02/execute/IterativeDivider.scala 39:21]
+    reg qReg : UInt<32>, clock with :
+      reset => (reset, UInt<32>("h0")) @[src/main/scala/objective02/execute/IterativeDivider.scala 40:21]
+    reg mReg : UInt<33>, clock with :
+      reset => (reset, UInt<33>("h0")) @[src/main/scala/objective02/execute/IterativeDivider.scala 41:21]
+    reg qNeg : UInt<1>, clock with :
+      reset => (reset, UInt<1>("h0")) @[src/main/scala/objective02/execute/IterativeDivider.scala 44:21]
+    reg rNeg : UInt<1>, clock with :
+      reset => (reset, UInt<1>("h0")) @[src/main/scala/objective02/execute/IterativeDivider.scala 45:21]
+    reg finalQuotient : UInt<32>, clock with :
+      reset => (reset, UInt<32>("h0")) @[src/main/scala/objective02/execute/IterativeDivider.scala 48:30]
+    reg finalRemainder : UInt<32>, clock with :
+      reset => (reset, UInt<32>("h0")) @[src/main/scala/objective02/execute/IterativeDivider.scala 49:31]
+    node _io_busy_T = neq(state, UInt<2>("h0")) @[src/main/scala/objective02/execute/IterativeDivider.scala 52:20]
+    io.busy <= _io_busy_T @[src/main/scala/objective02/execute/IterativeDivider.scala 52:11]
+    node _io_done_T = eq(state, UInt<2>("h2")) @[src/main/scala/objective02/execute/IterativeDivider.scala 53:20]
+    io.done <= _io_done_T @[src/main/scala/objective02/execute/IterativeDivider.scala 53:11]
+    io.quotient <= finalQuotient @[src/main/scala/objective02/execute/IterativeDivider.scala 54:15]
+    io.remainder <= finalRemainder @[src/main/scala/objective02/execute/IterativeDivider.scala 55:16]
+    io.iteration <= count @[src/main/scala/objective02/execute/IterativeDivider.scala 56:16]
+    node _dividendSign_T = bits(io.dividend, 31, 31) @[src/main/scala/objective02/execute/IterativeDivider.scala 59:48]
+    node dividendSign = and(io.isSigned, _dividendSign_T) @[src/main/scala/objective02/execute/IterativeDivider.scala 59:34]
+    node _divisorSign_T = bits(io.divisor, 31, 31) @[src/main/scala/objective02/execute/IterativeDivider.scala 60:46]
+    node divisorSign = and(io.isSigned, _divisorSign_T) @[src/main/scala/objective02/execute/IterativeDivider.scala 60:33]
+    wire absDividend : UInt<32> @[src/main/scala/objective02/execute/IterativeDivider.scala 62:25]
+    node _absDividend_T = not(io.dividend) @[src/main/scala/objective02/execute/IterativeDivider.scala 63:37]
+    node _absDividend_T_1 = add(_absDividend_T, UInt<1>("h1")) @[src/main/scala/objective02/execute/IterativeDivider.scala 63:51]
+    node _absDividend_T_2 = tail(_absDividend_T_1, 1) @[src/main/scala/objective02/execute/IterativeDivider.scala 63:51]
+    node _absDividend_T_3 = mux(dividendSign, _absDividend_T_2, io.dividend) @[src/main/scala/objective02/execute/IterativeDivider.scala 63:21]
+    absDividend <= _absDividend_T_3 @[src/main/scala/objective02/execute/IterativeDivider.scala 63:15]
+    wire absDivisor : UInt<32> @[src/main/scala/objective02/execute/IterativeDivider.scala 65:24]
+    node _absDivisor_T = not(io.divisor) @[src/main/scala/objective02/execute/IterativeDivider.scala 66:35]
+    node _absDivisor_T_1 = add(_absDivisor_T, UInt<1>("h1")) @[src/main/scala/objective02/execute/IterativeDivider.scala 66:48]
+    node _absDivisor_T_2 = tail(_absDivisor_T_1, 1) @[src/main/scala/objective02/execute/IterativeDivider.scala 66:48]
+    node _absDivisor_T_3 = mux(divisorSign, _absDivisor_T_2, io.divisor) @[src/main/scala/objective02/execute/IterativeDivider.scala 66:20]
+    absDivisor <= _absDivisor_T_3 @[src/main/scala/objective02/execute/IterativeDivider.scala 66:14]
+    node isDivByZero = eq(io.divisor, UInt<1>("h0")) @[src/main/scala/objective02/execute/IterativeDivider.scala 68:33]
+    node _isOverflow_T = eq(io.dividend, UInt<32>("h80000000")) @[src/main/scala/objective02/execute/IterativeDivider.scala 69:48]
+    node _isOverflow_T_1 = and(io.isSigned, _isOverflow_T) @[src/main/scala/objective02/execute/IterativeDivider.scala 69:32]
+    node _isOverflow_T_2 = eq(io.divisor, UInt<32>("hffffffff")) @[src/main/scala/objective02/execute/IterativeDivider.scala 69:82]
+    node isOverflow = and(_isOverflow_T_1, _isOverflow_T_2) @[src/main/scala/objective02/execute/IterativeDivider.scala 69:67]
+    when io.kill : @[src/main/scala/objective02/execute/IterativeDivider.scala 71:17]
+      state <= UInt<2>("h0") @[src/main/scala/objective02/execute/IterativeDivider.scala 72:11]
+      count <= UInt<1>("h0") @[src/main/scala/objective02/execute/IterativeDivider.scala 73:11]
+    else :
+      node _T = eq(UInt<2>("h0"), state) @[src/main/scala/objective02/execute/IterativeDivider.scala 75:19]
+      when _T : @[src/main/scala/objective02/execute/IterativeDivider.scala 75:19]
+        when io.start : @[src/main/scala/objective02/execute/IterativeDivider.scala 77:24]
+          node _qNeg_T = xor(dividendSign, divisorSign) @[src/main/scala/objective02/execute/IterativeDivider.scala 78:32]
+          qNeg <= _qNeg_T @[src/main/scala/objective02/execute/IterativeDivider.scala 78:16]
+          rNeg <= dividendSign @[src/main/scala/objective02/execute/IterativeDivider.scala 79:16]
+          when isDivByZero : @[src/main/scala/objective02/execute/IterativeDivider.scala 81:29]
+            finalQuotient <= UInt<32>("hffffffff") @[src/main/scala/objective02/execute/IterativeDivider.scala 82:27]
+            finalRemainder <= io.dividend @[src/main/scala/objective02/execute/IterativeDivider.scala 83:28]
+            state <= UInt<2>("h2") @[src/main/scala/objective02/execute/IterativeDivider.scala 84:19]
+          else :
+            when isOverflow : @[src/main/scala/objective02/execute/IterativeDivider.scala 85:34]
+              finalQuotient <= UInt<32>("h80000000") @[src/main/scala/objective02/execute/IterativeDivider.scala 86:27]
+              finalRemainder <= UInt<1>("h0") @[src/main/scala/objective02/execute/IterativeDivider.scala 87:28]
+              state <= UInt<2>("h2") @[src/main/scala/objective02/execute/IterativeDivider.scala 88:19]
+            else :
+              aReg <= UInt<1>("h0") @[src/main/scala/objective02/execute/IterativeDivider.scala 90:18]
+              qReg <= absDividend @[src/main/scala/objective02/execute/IterativeDivider.scala 91:18]
+              node _mReg_T = cat(UInt<1>("h0"), absDivisor) @[src/main/scala/objective02/execute/IterativeDivider.scala 92:24]
+              mReg <= _mReg_T @[src/main/scala/objective02/execute/IterativeDivider.scala 92:18]
+              count <= UInt<6>("h20") @[src/main/scala/objective02/execute/IterativeDivider.scala 93:19]
+              state <= UInt<2>("h1") @[src/main/scala/objective02/execute/IterativeDivider.scala 94:19]
+      else :
+        node _T_1 = eq(UInt<2>("h1"), state) @[src/main/scala/objective02/execute/IterativeDivider.scala 75:19]
+        when _T_1 : @[src/main/scala/objective02/execute/IterativeDivider.scala 75:19]
+          node _shiftedA_T = bits(aReg, 31, 0) @[src/main/scala/objective02/execute/IterativeDivider.scala 100:32]
+          node _shiftedA_T_1 = bits(qReg, 31, 31) @[src/main/scala/objective02/execute/IterativeDivider.scala 100:45]
+          node shiftedA = cat(_shiftedA_T, _shiftedA_T_1) @[src/main/scala/objective02/execute/IterativeDivider.scala 100:27]
+          node _shiftedQ_T = bits(qReg, 30, 0) @[src/main/scala/objective02/execute/IterativeDivider.scala 101:32]
+          node shiftedQ = cat(_shiftedQ_T, UInt<1>("h0")) @[src/main/scala/objective02/execute/IterativeDivider.scala 101:27]
+          node _subA_T = sub(shiftedA, mReg) @[src/main/scala/objective02/execute/IterativeDivider.scala 103:29]
+          node subA = tail(_subA_T, 1) @[src/main/scala/objective02/execute/IterativeDivider.scala 103:29]
+          node isNeg = bits(subA, 32, 32) @[src/main/scala/objective02/execute/IterativeDivider.scala 104:25]
+          when isNeg : @[src/main/scala/objective02/execute/IterativeDivider.scala 106:21]
+            aReg <= shiftedA @[src/main/scala/objective02/execute/IterativeDivider.scala 108:16]
+            qReg <= shiftedQ @[src/main/scala/objective02/execute/IterativeDivider.scala 109:16]
+          else :
+            aReg <= subA @[src/main/scala/objective02/execute/IterativeDivider.scala 112:16]
+            node _qReg_T = or(shiftedQ, UInt<1>("h1")) @[src/main/scala/objective02/execute/IterativeDivider.scala 113:28]
+            qReg <= _qReg_T @[src/main/scala/objective02/execute/IterativeDivider.scala 113:16]
+          node _count_T = sub(count, UInt<1>("h1")) @[src/main/scala/objective02/execute/IterativeDivider.scala 116:24]
+          node _count_T_1 = tail(_count_T, 1) @[src/main/scala/objective02/execute/IterativeDivider.scala 116:24]
+          count <= _count_T_1 @[src/main/scala/objective02/execute/IterativeDivider.scala 116:15]
+          node _T_2 = eq(count, UInt<1>("h1")) @[src/main/scala/objective02/execute/IterativeDivider.scala 117:20]
+          when _T_2 : @[src/main/scala/objective02/execute/IterativeDivider.scala 117:29]
+            state <= UInt<2>("h2") @[src/main/scala/objective02/execute/IterativeDivider.scala 118:17]
+            node _qResult_T = or(shiftedQ, UInt<1>("h1")) @[src/main/scala/objective02/execute/IterativeDivider.scala 120:55]
+            node qResult = mux(isNeg, shiftedQ, _qResult_T) @[src/main/scala/objective02/execute/IterativeDivider.scala 120:28]
+            node _rResult_T = mux(isNeg, shiftedA, subA) @[src/main/scala/objective02/execute/IterativeDivider.scala 121:28]
+            node rResult = bits(_rResult_T, 31, 0) @[src/main/scala/objective02/execute/IterativeDivider.scala 121:51]
+            node _finalQuotient_T = not(qResult) @[src/main/scala/objective02/execute/IterativeDivider.scala 123:39]
+            node _finalQuotient_T_1 = add(_finalQuotient_T, UInt<1>("h1")) @[src/main/scala/objective02/execute/IterativeDivider.scala 123:49]
+            node _finalQuotient_T_2 = tail(_finalQuotient_T_1, 1) @[src/main/scala/objective02/execute/IterativeDivider.scala 123:49]
+            node _finalQuotient_T_3 = mux(qNeg, _finalQuotient_T_2, qResult) @[src/main/scala/objective02/execute/IterativeDivider.scala 123:31]
+            finalQuotient <= _finalQuotient_T_3 @[src/main/scala/objective02/execute/IterativeDivider.scala 123:25]
+            node _finalRemainder_T = not(rResult) @[src/main/scala/objective02/execute/IterativeDivider.scala 124:40]
+            node _finalRemainder_T_1 = add(_finalRemainder_T, UInt<1>("h1")) @[src/main/scala/objective02/execute/IterativeDivider.scala 124:50]
+            node _finalRemainder_T_2 = tail(_finalRemainder_T_1, 1) @[src/main/scala/objective02/execute/IterativeDivider.scala 124:50]
+            node _finalRemainder_T_3 = mux(rNeg, _finalRemainder_T_2, rResult) @[src/main/scala/objective02/execute/IterativeDivider.scala 124:32]
+            finalRemainder <= _finalRemainder_T_3 @[src/main/scala/objective02/execute/IterativeDivider.scala 124:26]
+        else :
+          node _T_3 = eq(UInt<2>("h2"), state) @[src/main/scala/objective02/execute/IterativeDivider.scala 75:19]
+          when _T_3 : @[src/main/scala/objective02/execute/IterativeDivider.scala 75:19]
+            state <= UInt<2>("h0") @[src/main/scala/objective02/execute/IterativeDivider.scala 129:15]
+
+

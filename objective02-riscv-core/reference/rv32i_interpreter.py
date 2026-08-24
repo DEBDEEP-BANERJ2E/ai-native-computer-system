@@ -3,7 +3,8 @@
 RV32IM Reference Interpreter for Objective 2 Differential Verification.
 Mirrors hardware execution semantics including little-endian byte lanes,
 misalignment rejection, full RV32M extension, Phase 6 System MMIO & Telemetry,
-and cycle-by-cycle commit event logging.
+Phase 7 CapabilityLite security, Phase 8 Precise Security Traps, and
+cycle-by-cycle commit event logging.
 """
 
 from typing import List, Dict, Optional, Tuple, NamedTuple
@@ -65,11 +66,21 @@ class RV32Interpreter:
         self.mem_vis_retired_count = 0
         self.mem_vis_last_commit_pc = 0
 
+        # Phase 6 Sticky First-Event Audit Logger
         self.sec_status = 0
         self.sec_pc = 0
         self.sec_addr = 0
         self.sec_info = 0
         self.sec_context = 0
+
+        # Phase 8 Dedicated Architectural Trap State
+        self.trap_control = 0 # bit 0: enable
+        self.trap_status = 0  # bit 0: active, bit 1: double_fault
+        self.trap_vector = 0x00000800
+        self.trap_epc = 0
+        self.trap_cause = 0
+        self.trap_addr = 0
+        self.trap_context = 0
 
         # State tracking for stall emulation
         self.last_was_load = False
@@ -79,9 +90,9 @@ class RV32Interpreter:
     def reset(self):
         self.regs = [0] * 32
         self.cap_regs = [
-            CapabilityLite(False, 0, 0, 0, 0),                       # c0: NULL
-            CapabilityLite(True, 0x00000000, 0x00001000, 3, 0),      # c1: RAM Root (0..0x1000, RW)
-            CapabilityLite(True, 0x80000000, 0x00010000, 3, 0),      # c2: MMIO Root (0x80000000..0x80010000, RW)
+            CapabilityLite(False, 0, 0, 0, 0),                       # c0: NULL (immutable)
+            CapabilityLite(True, 0x00000000, 0x00001000, 3, 0),      # c1: RAM Root (0..0x1000, RW, immutable)
+            CapabilityLite(True, 0x80000000, 0x00010000, 3, 0),      # c2: MMIO Root (0x80000000..0x80010000, RW, immutable)
             CapabilityLite(False, 0, 0, 0, 0),                       # c3: NULL
             CapabilityLite(False, 0, 0, 0, 0),                       # c4: NULL
             CapabilityLite(False, 0, 0, 0, 0),                       # c5: NULL
@@ -117,16 +128,43 @@ class RV32Interpreter:
         self.sec_addr = 0
         self.sec_info = 0
         self.sec_context = 0
+        self.trap_control = 0
+        self.trap_status = 0
+        self.trap_vector = 0x00000800
+        self.trap_epc = 0
+        self.trap_cause = 0
+        self.trap_addr = 0
+        self.trap_context = 0
         self.last_was_load = False
         self.last_load_rd = 0
 
-    def trigger_security_violation(self, access_type: int, reason: int, addr: int, pc: int):
+    def trigger_security_violation(self, access_type: int, reason: int, addr: int, pc: int) -> bool:
+        # 1. Update Phase 6 Sticky Audit Logger
         if self.sec_status == 0:
             self.sec_status = 1
             self.sec_pc = pc & 0xFFFFFFFF
             self.sec_addr = addr & 0xFFFFFFFF
             self.sec_info = ((access_type & 0x3) << 4) | (reason & 0xF)
             self.sec_context = self.mmio_regs.get(0x80002024, 0)
+
+        # 2. Phase 8 Precise Trap & Double-Fault State Machine
+        trap_enabled = (self.trap_control & 1) != 0
+        trap_active = (self.trap_status & 1) != 0
+
+        if trap_enabled:
+            if not trap_active:
+                # Primary precise trap
+                self.trap_status |= 1 # ACTIVE
+                self.trap_epc = pc & 0xFFFFFFFC
+                self.trap_cause = ((access_type & 0x3) << 4) | (reason & 0xF)
+                self.trap_addr = addr & 0xFFFFFFFF
+                self.trap_context = self.mmio_regs.get(0x80002024, 0)
+                return True # take_precise_trap = True
+            else:
+                # Nested violation -> double fault without recursive redirect
+                self.trap_status |= 2 # DOUBLE_FAULT
+                return False # retires as denied op
+        return False
 
     def load_program(self, words: List[int], start_addr: int = 0):
         self.imem = bytearray(self.memory_size)
@@ -165,6 +203,7 @@ class RV32Interpreter:
         mem_addr = 0
         mem_write_data = 0
         illegal = False
+        trap_taken = False
 
         # Immediate decoding
         imm_i = self.to_signed(inst >> 20, 12)
@@ -248,55 +287,57 @@ class RV32Interpreter:
                 if funct3 == 0: # MUL
                     write_data = (s_val1 * s_val2) & 0xFFFFFFFF
                     telem_valid = True; telem_mul = True; telem_res = write_data
-                elif funct3 == 1: # MULH (signed x signed high)
-                    prod = s_val1 * s_val2
-                    write_data = (prod >> 32) & 0xFFFFFFFF
-                    telem_valid = True; telem_mul = True; telem_res = write_data
-                elif funct3 == 2: # MULHSU (signed x unsigned high)
-                    prod = s_val1 * val2
-                    write_data = (prod >> 32) & 0xFFFFFFFF
-                    telem_valid = True; telem_mul = True; telem_res = write_data
-                elif funct3 == 3: # MULHU (unsigned x unsigned high)
-                    prod = val1 * val2
-                    write_data = (prod >> 32) & 0xFFFFFFFF
-                    telem_valid = True; telem_mul = True; telem_res = write_data
-                elif funct3 == 4: # DIV (signed)
-                    self.div_busy_cycles += 33
-                    self.pipeline_stall_count += 33
+                elif funct3 == 1: # MULH
+                    write_data = ((s_val1 * s_val2) >> 32) & 0xFFFFFFFF
+                elif funct3 == 2: # MULHSU
+                    write_data = ((s_val1 * val2) >> 32) & 0xFFFFFFFF
+                elif funct3 == 3: # MULHU
+                    write_data = ((val1 * val2) >> 32) & 0xFFFFFFFF
+                elif funct3 == 4: # DIV
                     if val2 == 0:
+                        self.div_busy_cycles += 1
+                        self.pipeline_stall_count += 1
                         write_data = 0xFFFFFFFF
-                    elif s_val1 == -0x80000000 and s_val2 == -1:
+                    elif s_val1 == -2147483648 and s_val2 == -1:
+                        self.div_busy_cycles += 1
+                        self.pipeline_stall_count += 1
                         write_data = 0x80000000
                     else:
-                        q = abs(s_val1) // abs(s_val2)
-                        if (s_val1 < 0) ^ (s_val2 < 0):
-                            q = -q
-                        write_data = q & 0xFFFFFFFF
-                elif funct3 == 5: # DIVU (unsigned)
-                    self.div_busy_cycles += 33
-                    self.pipeline_stall_count += 33
+                        self.div_busy_cycles += 33
+                        self.pipeline_stall_count += 33
+                        sign = -1 if (s_val1 < 0) ^ (s_val2 < 0) else 1
+                        write_data = (sign * (abs(s_val1) // abs(s_val2))) & 0xFFFFFFFF
+                elif funct3 == 5: # DIVU
                     if val2 == 0:
+                        self.div_busy_cycles += 1
+                        self.pipeline_stall_count += 1
                         write_data = 0xFFFFFFFF
                     else:
+                        self.div_busy_cycles += 33
+                        self.pipeline_stall_count += 33
                         write_data = (val1 // val2) & 0xFFFFFFFF
-                elif funct3 == 6: # REM (signed)
-                    self.div_busy_cycles += 33
-                    self.pipeline_stall_count += 33
+                elif funct3 == 6: # REM
                     if val2 == 0:
+                        self.div_busy_cycles += 1
+                        self.pipeline_stall_count += 1
                         write_data = val1 & 0xFFFFFFFF
-                    elif s_val1 == -0x80000000 and s_val2 == -1:
+                    elif s_val1 == -2147483648 and s_val2 == -1:
+                        self.div_busy_cycles += 1
+                        self.pipeline_stall_count += 1
                         write_data = 0
                     else:
-                        r = abs(s_val1) % abs(s_val2)
-                        if s_val1 < 0:
-                            r = -r
-                        write_data = r & 0xFFFFFFFF
-                elif funct3 == 7: # REMU (unsigned)
-                    self.div_busy_cycles += 33
-                    self.pipeline_stall_count += 33
+                        self.div_busy_cycles += 33
+                        self.pipeline_stall_count += 33
+                        sign = -1 if s_val1 < 0 else 1
+                        write_data = (sign * (abs(s_val1) % abs(s_val2))) & 0xFFFFFFFF
+                elif funct3 == 7: # REMU
                     if val2 == 0:
+                        self.div_busy_cycles += 1
+                        self.pipeline_stall_count += 1
                         write_data = val1 & 0xFFFFFFFF
                     else:
+                        self.div_busy_cycles += 33
+                        self.pipeline_stall_count += 33
                         write_data = (val1 % val2) & 0xFFFFFFFF
                 else:
                     illegal = True
@@ -373,6 +414,14 @@ class RV32Interpreter:
                     elif mem_addr == 0x80002108: write_data = self.sec_addr
                     elif mem_addr == 0x8000210C: write_data = self.sec_info
                     elif mem_addr == 0x80002110: write_data = self.sec_context
+                    elif mem_addr == 0x80002114: write_data = self.trap_control & 1
+                    elif mem_addr == 0x80002118: write_data = self.trap_status & 3
+                    elif mem_addr == 0x8000211C: write_data = self.trap_vector & 0xFFFFFFFC
+                    elif mem_addr == 0x80002120: write_data = self.trap_epc & 0xFFFFFFFC
+                    elif mem_addr == 0x80002124: write_data = self.trap_cause & 0x3F
+                    elif mem_addr == 0x80002128: write_data = self.trap_addr & 0xFFFFFFFF
+                    elif mem_addr == 0x8000212C: write_data = self.trap_context & 0xFFFFFFFF
+                    elif mem_addr == 0x80002130: write_data = 0
                     else:
                         mem_read = False
                         reg_write = False
@@ -425,6 +474,25 @@ class RV32Interpreter:
                         if val2 & 1:
                             self.sec_status = 0
                         mem_write = True
+                    elif mem_addr == 0x80002114:
+                        self.trap_control = val2 & 1
+                        mem_write = True
+                    elif mem_addr == 0x80002118:
+                        if val2 & 2:
+                            self.trap_status &= ~2 # W1C DOUBLE_FAULT
+                        mem_write = True
+                    elif mem_addr == 0x8000211C:
+                        self.trap_vector = val2 & 0xFFFFFFFC
+                        mem_write = True
+                    elif mem_addr == 0x80002120:
+                        if self.trap_status & 1:
+                            self.trap_epc = val2 & 0xFFFFFFFC
+                        mem_write = True
+                    elif mem_addr == 0x80002130:
+                        if (self.trap_status & 1) and (val2 & 1):
+                            self.trap_status &= ~1 # Clear ACTIVE
+                            next_pc = self.trap_epc
+                        mem_write = True # TRAP_RETURN command store retires normally!
                     else:
                         mem_write = False
                 else:
@@ -490,7 +558,23 @@ class RV32Interpreter:
         elif opcode == 0x0B: # OP_CAP: Capability Manipulation
             cs1_idx = rs1
             cd_idx = rd
-            if cs1_idx > 7 or funct7 != 0:
+            if funct3 == 7: # Extended Capability Operations (CGETOFFSET, CCLEAR)
+                if funct7 == 0x00: # CGETOFFSET rd, cs1
+                    if cs1_idx > 7:
+                        illegal = True
+                    else:
+                        reg_write = True
+                        src_cap = self.cap_regs[cs1_idx]
+                        write_data = src_cap.offset & 0xFFFFFFFF
+                elif funct7 == 0x01: # CCLEAR cd
+                    if cd_idx > 7:
+                        illegal = True
+                    else:
+                        if cd_idx >= 3: # c0, c1, c2 are hardware-immutable roots
+                            self.cap_regs[cd_idx] = CapabilityLite(False, 0, 0, 0, 0)
+                else:
+                    illegal = True
+            elif cs1_idx > 7 or funct7 != 0:
                 illegal = True
             elif funct3 <= 2 and cd_idx > 7:
                 illegal = True
@@ -502,18 +586,18 @@ class RV32Interpreter:
                     req_top = req_base + req_len
                     parent_top = src_cap.base + src_cap.length
                     if not src_cap.tag:
-                        self.trigger_security_violation(3, 1, req_base, current_pc) # INVALID_CAPABILITY
+                        trap_taken = self.trigger_security_violation(3, 1, req_base, current_pc) # INVALID_CAPABILITY
                     elif req_top > parent_top:
-                        self.trigger_security_violation(3, 6, req_base, current_pc) # MONOTONICITY
+                        trap_taken = self.trigger_security_violation(3, 6, req_base, current_pc) # MONOTONICITY
                     else:
-                        if cd_idx != 0:
+                        if cd_idx >= 3: # c0, c1, c2 are immutable roots
                             self.cap_regs[cd_idx] = CapabilityLite(True, req_base, req_len, src_cap.perms, 0)
                 elif funct3 == 1: # CANDPERM cd, cs1, rs2
                     if not src_cap.tag:
-                        self.trigger_security_violation(3, 1, src_cap.base, current_pc) # INVALID_CAPABILITY
+                        trap_taken = self.trigger_security_violation(3, 1, src_cap.base, current_pc) # INVALID_CAPABILITY
                     else:
                         new_perms = src_cap.perms & (val2 & 0x7)
-                        if cd_idx != 0:
+                        if cd_idx >= 3: # c0, c1, c2 are immutable roots
                             self.cap_regs[cd_idx] = CapabilityLite(True, src_cap.base, src_cap.length, new_perms, src_cap.offset)
                 elif funct3 == 2: # CINCOFFSET cd, cs1, rs2
                     u_offset = src_cap.offset & 0xFFFFFFFF
@@ -521,11 +605,11 @@ class RV32Interpreter:
                     new_offset_s = u_offset + s_delta
                     cursor_addr = (src_cap.base + src_cap.offset) & 0xFFFFFFFF
                     if not src_cap.tag:
-                        self.trigger_security_violation(3, 1, cursor_addr, current_pc) # INVALID_CAPABILITY
+                        trap_taken = self.trigger_security_violation(3, 1, cursor_addr, current_pc) # INVALID_CAPABILITY
                     elif new_offset_s < 0 or new_offset_s > src_cap.length:
-                        self.trigger_security_violation(3, 2, cursor_addr, current_pc) # BOUNDS
+                        trap_taken = self.trigger_security_violation(3, 2, cursor_addr, current_pc) # BOUNDS
                     else:
-                        if cd_idx != 0:
+                        if cd_idx >= 3: # c0, c1, c2 are immutable roots
                             self.cap_regs[cd_idx] = CapabilityLite(True, src_cap.base, src_cap.length, src_cap.perms, new_offset_s & 0xFFFFFFFF)
                 elif funct3 == 3: # CGETBASE rd, cs1
                     reg_write = True
@@ -560,16 +644,16 @@ class RV32Interpreter:
                 cap_allowed = True
                 if not src_cap.tag:
                     cap_allowed = False
-                    self.trigger_security_violation(1 if is_store else 0, 1, eff_addr, current_pc) # INVALID_CAPABILITY
+                    trap_taken = self.trigger_security_violation(1 if is_store else 0, 1, eff_addr, current_pc) # INVALID_CAPABILITY
                 elif not (eff_addr >= src_cap.base and access_end <= cap_top):
                     cap_allowed = False
-                    self.trigger_security_violation(1 if is_store else 0, 2, eff_addr, current_pc) # BOUNDS
+                    trap_taken = self.trigger_security_violation(1 if is_store else 0, 2, eff_addr, current_pc) # BOUNDS
                 elif is_store and not (src_cap.perms & 2):
                     cap_allowed = False
-                    self.trigger_security_violation(1, 4, eff_addr, current_pc) # WRITE_PERMISSION
+                    trap_taken = self.trigger_security_violation(1, 4, eff_addr, current_pc) # WRITE_PERMISSION
                 elif (not is_store) and not (src_cap.perms & 1):
                     cap_allowed = False
-                    self.trigger_security_violation(0, 3, eff_addr, current_pc) # READ_PERMISSION
+                    trap_taken = self.trigger_security_violation(0, 3, eff_addr, current_pc) # READ_PERMISSION
 
                 if not is_store: # Protected Load (CLB, CLH, CLW)
                     mem_read_req = True
@@ -602,6 +686,14 @@ class RV32Interpreter:
                                 elif mem_addr == 0x80002108: write_data = self.sec_addr
                                 elif mem_addr == 0x8000210C: write_data = self.sec_info
                                 elif mem_addr == 0x80002110: write_data = self.sec_context
+                                elif mem_addr == 0x80002114: write_data = self.trap_control & 1
+                                elif mem_addr == 0x80002118: write_data = self.trap_status & 3
+                                elif mem_addr == 0x8000211C: write_data = self.trap_vector & 0xFFFFFFFC
+                                elif mem_addr == 0x80002120: write_data = self.trap_epc & 0xFFFFFFFC
+                                elif mem_addr == 0x80002124: write_data = self.trap_cause & 0x3F
+                                elif mem_addr == 0x80002128: write_data = self.trap_addr & 0xFFFFFFFF
+                                elif mem_addr == 0x8000212C: write_data = self.trap_context & 0xFFFFFFFF
+                                elif mem_addr == 0x80002130: write_data = 0
                                 else:
                                     mem_read = False; reg_write = False
                             else:
@@ -639,6 +731,25 @@ class RV32Interpreter:
                                     if val2 & 1:
                                         self.sec_status = 0
                                     mem_write = True
+                                elif mem_addr == 0x80002114:
+                                    self.trap_control = val2 & 1
+                                    mem_write = True
+                                elif mem_addr == 0x80002118:
+                                    if val2 & 2:
+                                        self.trap_status &= ~2
+                                    mem_write = True
+                                elif mem_addr == 0x8000211C:
+                                    self.trap_vector = val2 & 0xFFFFFFFC
+                                    mem_write = True
+                                elif mem_addr == 0x80002120:
+                                    if self.trap_status & 1:
+                                        self.trap_epc = val2 & 0xFFFFFFFC
+                                    mem_write = True
+                                elif mem_addr == 0x80002130:
+                                    if (self.trap_status & 1) and (val2 & 1):
+                                        self.trap_status &= ~1 # Clear ACTIVE
+                                        next_pc = self.trap_epc
+                                    mem_write = True # TRAP_RETURN store retires normally!
                                 else:
                                     mem_write = False
                             else:
@@ -657,8 +768,8 @@ class RV32Interpreter:
         else:
             illegal = True
 
-        # Safety squash on illegal
-        if illegal:
+        # Safety squash on illegal or trap
+        if illegal or trap_taken:
             reg_write = False
             mem_read = False
             mem_read_req = False
@@ -669,6 +780,11 @@ class RV32Interpreter:
         if reg_write and rd != 0:
             self.regs[rd] = write_data
         self.regs[0] = 0
+
+        if trap_taken:
+            # Precise exception redirect: faulting instruction does NOT commit
+            self.pc = self.trap_vector
+            return None
 
         self.pc = next_pc
         self.last_was_load = is_current_load
@@ -692,9 +808,6 @@ class RV32Interpreter:
         self.last_commit_pc = current_pc
 
         # Snapshot for MEM stage visibility of next instruction:
-        # If the pipeline flushes (taken branch, jumps),
-        # this instruction commits in WB before the target/next instruction reaches MEM.
-        # In straight-line back-to-back flow, the next instruction in MEM sees the state before this retirement.
         is_flush_or_long_stall = (opcode == 0x63 and take) or (opcode in (0x6F, 0x67))
         if is_flush_or_long_stall:
             self.mem_vis_cla_switching = self.cla_switching
@@ -728,7 +841,5 @@ class RV32Interpreter:
         steps = 0
         while not self.halted and steps < max_steps:
             ev = self.step()
-            if ev is None:
-                break
             steps += 1
         return self.trace

@@ -38,21 +38,45 @@ class CapabilityRegFileSpec extends AnyFlatSpec with ChiselScalatestTester with 
     }
   }
 
-  it should "discard writes to c0 and maintain permanent NULL state" in {
+  it should "discard writes to c0, c1, and c2 and maintain permanent root immutability" in {
     test(new CapabilityRegFile) { dut =>
+      // Attempt write to c0 (NULL)
       dut.io.wen.poke(true.B)
       dut.io.waddr.poke(0.U)
       dut.io.wdata.tag.poke(true.B)
       dut.io.wdata.base.poke("h12345678".U)
-      dut.io.wdata.length.poke("h00000100".U)
-      dut.io.wdata.perms.poke(CapabilityPerms.RW)
-      dut.io.wdata.offset.poke(0.U)
       dut.clock.step(1)
 
       dut.io.wen.poke(false.B)
       dut.io.raddr1.poke(0.U)
       dut.io.rdata1.tag.expect(false.B)
       dut.io.rdata1.base.expect(0.U)
+
+      // Attempt write to c1 (RAM root)
+      dut.io.wen.poke(true.B)
+      dut.io.waddr.poke(1.U)
+      dut.io.wdata.tag.poke(false.B)
+      dut.io.wdata.base.poke("hDEADBEEF".U)
+      dut.clock.step(1)
+
+      dut.io.wen.poke(false.B)
+      dut.io.raddr1.poke(1.U)
+      dut.io.rdata1.tag.expect(true.B)
+      dut.io.rdata1.base.expect("h00000000".U)
+      dut.io.rdata1.length.expect("h00001000".U)
+
+      // Attempt write to c2 (MMIO root)
+      dut.io.wen.poke(true.B)
+      dut.io.waddr.poke(2.U)
+      dut.io.wdata.tag.poke(false.B)
+      dut.io.wdata.base.poke("hCAFEBABE".U)
+      dut.clock.step(1)
+
+      dut.io.wen.poke(false.B)
+      dut.io.raddr1.poke(2.U)
+      dut.io.rdata1.tag.expect(true.B)
+      dut.io.rdata1.base.expect("h80000000".U)
+      dut.io.rdata1.length.expect("h00010000".U)
     }
   }
 

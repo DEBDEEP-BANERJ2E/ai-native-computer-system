@@ -38,6 +38,18 @@ class CommitBundle extends Bundle {
   val illegal      = Output(Bool())
 }
 
+// =========================================================================
+// Objective 2 Phase 8 Trap Observability Bundle
+// =========================================================================
+class TrapObservabilityIO extends Bundle {
+  val trapTaken  = Output(Bool())
+  val trapTarget = Output(UInt(32.W))
+  val trapEpc    = Output(UInt(32.W))
+  val trapCause  = Output(UInt(32.W))
+  val trapAddr   = Output(UInt(32.W))
+  val trapActive = Output(Bool())
+}
+
 class PipelinedCoreIO extends Bundle {
   // Architectural Retirement Port (originates at WB stage)
   val commit = new CommitBundle
@@ -74,6 +86,9 @@ class PipelinedCoreIO extends Bundle {
   val schedHint            = Output(UInt(32.W))
   val processBehaviorClass = Output(UInt(32.W))
   val currentContext       = Output(UInt(32.W))
+
+  // Phase 8 Precise Trap Observability
+  val trap                 = new TrapObservabilityIO
 }
 
 class PipelinedCore(
@@ -109,11 +124,13 @@ class PipelinedCore(
   val memWbReg = Module(new MEM_WB_Register)
 
   // Forward declarations for control signals
-  val branchTaken    = Wire(Bool())
-  val redirectTarget = Wire(UInt(32.W))
-  val wbRegWrite     = Wire(Bool())
-  val wbRd           = Wire(UInt(5.W))
-  val wbData         = Wire(UInt(32.W))
+  val branchTaken     = Wire(Bool())
+  val redirectTarget  = Wire(UInt(32.W))
+  val takePreciseTrap = Wire(Bool())
+  val takeTrapReturn  = Wire(Bool())
+  val wbRegWrite      = Wire(Bool())
+  val wbRd            = Wire(UInt(5.W))
+  val wbData          = Wire(UInt(32.W))
 
   // =========================================================================
   // 2. HAZARD DETECTION (ID Stage Consumer vs EX/MEM Stage Producers)
@@ -144,29 +161,39 @@ class PipelinedCore(
   hazardUnit.io.exMemCapRd       := exMemReg.io.out.capRd
 
   hazardUnit.io.branchTaken      := branchTaken
+  hazardUnit.io.trapTaken        := takePreciseTrap
+  hazardUnit.io.trapReturn       := takeTrapReturn
 
-  // Divider EX Hold Logic
+  // Divider EX Hold Logic (killed if younger than trap or return)
   val exValid       = idExReg.io.out.valid
   val exControls    = idExReg.io.out.controls
   val isDivOp       = exControls.mOp === MOp.DIV || exControls.mOp === MOp.DIVU || exControls.mOp === MOp.REM || exControls.mOp === MOp.REMU
-  val divHold       = exValid && isDivOp && !divRem.io.done
+  val divHold       = exValid && isDivOp && !divRem.io.done && !takePreciseTrap && !takeTrapReturn
+
+  divRem.io.kill    := takePreciseTrap || takeTrapReturn
 
   val stallIF   = hazardUnit.io.stallIF || divHold
   val stallID   = hazardUnit.io.stallID || divHold
-  val flushIFID = hazardUnit.io.flushIFID
-  val flushIDEX = hazardUnit.io.flushIDEX
+  val flushIFID = hazardUnit.io.flushIFID || takePreciseTrap || takeTrapReturn
+  val flushIDEX = hazardUnit.io.flushIDEX || takePreciseTrap || takeTrapReturn
+  val flushEXMEM= takePreciseTrap || takeTrapReturn
 
   // =========================================================================
   // 3. STAGE 1: INSTRUCTION FETCH (IF)
+  // Priority: MEM Precise Trap > MEM Trap-Return > EX Branch/Jump > Stall > PC+4
   // =========================================================================
   val programLengthBytes = if (initialProgram.nonEmpty) initialProgram.length * 4 else imemDepthWords * 4
   imem.io.address := pc.io.pc
   val ifInstruction = imem.io.instruction
   val ifValid = (pc.io.pc < programLengthBytes.U)
 
+  val pcRedirectTaken  = takePreciseTrap || takeTrapReturn || branchTaken
+  val pcRedirectTarget = Mux(takePreciseTrap, systemMMIO.io.trapVector,
+                         Mux(takeTrapReturn, systemMMIO.io.trapEpc, redirectTarget))
+
   pc.io.stall            := stallIF
-  pc.io.jumpBranchTaken  := branchTaken
-  pc.io.jumpBranchTarget := redirectTarget
+  pc.io.jumpBranchTaken  := pcRedirectTaken
+  pc.io.jumpBranchTarget := pcRedirectTarget
 
   ifIdReg.io.stall := stallID
   ifIdReg.io.flush := flushIFID
@@ -223,81 +250,73 @@ class PipelinedCore(
   forwardingUnit.io.memWbRegWrite := memWbReg.io.out.regWrite
   forwardingUnit.io.memWbRd       := memWbReg.io.out.rd
 
-  // EX/MEM forwarding data (excluding loads)
-  val exMemForwardData = MuxLookup(exMemReg.io.out.wbSource, exMemReg.io.out.aluResult)(Seq(
-    WBSource.ALU       -> exMemReg.io.out.aluResult,
-    WBSource.PC_PLUS_4 -> exMemReg.io.out.pcPlus4,
-    WBSource.IMM       -> exMemReg.io.out.imm
+  val forwardedRs1 = MuxLookup(forwardingUnit.io.forwardA, idExReg.io.out.rs1Data)(Seq(
+    0.U -> idExReg.io.out.rs1Data,
+    1.U -> wbData,
+    2.U -> exMemReg.io.out.aluResult
   ))
 
-  // Resolved forwarded source register values
-  val forwardedRs1 = Mux(forwardingUnit.io.forwardA === 2.U, exMemForwardData,
-                     Mux(forwardingUnit.io.forwardA === 1.U, wbData, idExReg.io.out.rs1Data))
+  val forwardedRs2 = MuxLookup(forwardingUnit.io.forwardB, idExReg.io.out.rs2Data)(Seq(
+    0.U -> idExReg.io.out.rs2Data,
+    1.U -> wbData,
+    2.U -> exMemReg.io.out.aluResult
+  ))
 
-  val forwardedRs2 = Mux(forwardingUnit.io.forwardB === 2.U, exMemForwardData,
-                     Mux(forwardingUnit.io.forwardB === 1.U, wbData, idExReg.io.out.rs2Data))
-
-  // Operand selection using forwarded register values
-  val operandA = MuxLookup(exControls.aluSrcA, 0.U(32.W))(Seq(
+  // ALU Input Operand Selection
+  val aluOperandA = MuxLookup(exControls.aluSrcA, forwardedRs1)(Seq(
     ALUSrcA.RS1  -> forwardedRs1,
     ALUSrcA.PC   -> exPc,
     ALUSrcA.ZERO -> 0.U(32.W)
   ))
 
-  val operandB = MuxLookup(exControls.aluSrcB, 0.U(32.W))(Seq(
+  val aluOperandB = MuxLookup(exControls.aluSrcB, forwardedRs2)(Seq(
     ALUSrcB.RS2  -> forwardedRs2,
     ALUSrcB.IMM  -> idExReg.io.out.imm,
     ALUSrcB.FOUR -> 4.U(32.W)
   ))
 
-  // Objective 1 ALU execution
-  alu.io.a      := operandA
-  alu.io.b      := operandB
+  alu.io.a      := aluOperandA
+  alu.io.b      := aluOperandB
   alu.io.opcode := exControls.aluOp
 
-  // Phase 5A: RV32M Multiplier
+  // Multiplier Unit Connections (RV32M MUL, MULH, MULHSU, MULHU)
   rv32mMult.io.rs1 := forwardedRs1
   rv32mMult.io.rs2 := forwardedRs2
   rv32mMult.io.mOp := exControls.mOp
 
-  // Phase 5B: Iterative Divider
+  // Divider Unit Connections (RV32M DIV, DIVU, REM, REMU)
+  divRem.io.start    := exValid && isDivOp && !divRem.io.busy && !divRem.io.done
   divRem.io.dividend := forwardedRs1
   divRem.io.divisor  := forwardedRs2
-  divRem.io.isSigned := (exControls.mOp === MOp.DIV) || (exControls.mOp === MOp.REM)
-  divRem.io.start    := exValid && isDivOp && !divRem.io.busy
+  divRem.io.isSigned := (exControls.mOp === MOp.DIV || exControls.mOp === MOp.REM)
 
-  // =========================================================================
-  // Phase 7: Capability Manipulation & Derivation Execution (EX)
-  // =========================================================================
+  // Capability Derivation Logic in EX Stage
   val inCap = idExReg.io.out.capRs1Data
 
   // 1. CSETBOUNDS cd, cs1, rs2 (rs2 = length)
-  val csetNewBase33   = Cat(0.U(1.W), inCap.base) +& Cat(0.U(1.W), inCap.offset)
-  val csetReqLen33    = Cat(0.U(1.W), forwardedRs2)
-  val csetReqTop33    = csetNewBase33 +& csetReqLen33
-  val csetParentTop33 = Cat(0.U(1.W), inCap.base) +& Cat(0.U(1.W), inCap.length)
-  val csetBoundsOk    = (csetNewBase33 >= Cat(0.U(1.W), inCap.base)) && (csetReqTop33 <= csetParentTop33)
-  val csetSuccess     = inCap.tag && csetBoundsOk
+  val requestedLength = forwardedRs2
+  val currentRemainingLength = Mux(inCap.offset <= inCap.length, inCap.length - inCap.offset, 0.U)
+  val csetBoundsOk = (inCap.offset <= inCap.length) && (requestedLength <= currentRemainingLength)
+  val csetSuccess  = inCap.tag && csetBoundsOk
 
   val csetDerivedCap = Wire(new CapabilityLite)
   csetDerivedCap.tag    := csetSuccess
   csetDerivedCap.base   := inCap.base + inCap.offset
-  csetDerivedCap.length := forwardedRs2
+  csetDerivedCap.length := requestedLength
   csetDerivedCap.perms  := inCap.perms
   csetDerivedCap.offset := 0.U(32.W)
 
-  // 2. CANDPERM cd, cs1, rs2 (rs2 = permission mask)
+  // 2. CANDPERM cd, cs1, rs2 (rs2 = perms mask)
   val candDerivedCap = Wire(new CapabilityLite)
   candDerivedCap.tag    := inCap.tag
   candDerivedCap.base   := inCap.base
   candDerivedCap.length := inCap.length
-  candDerivedCap.perms  := inCap.perms & forwardedRs2(2, 0)
+  candDerivedCap.perms  := inCap.perms & forwardedRs2(3, 0)
   candDerivedCap.offset := inCap.offset
 
-  // 3. CINCOFFSET cd, cs1, rs2 (inCap.offset = unsigned 32-bit, rs2 = signed 32-bit delta)
-  val offsetExtS   = Cat(0.U(1.W), inCap.offset).asSInt // 33-bit positive signed
-  val deltaExtS    = forwardedRs2.asSInt                // 32-bit signed
-  // 34-bit signed arithmetic to prevent overflow wrapping
+  // 3. CINCOFFSET cd, cs1, rs2 (rs2 = signed delta)
+  val offsetExtS   = Cat(0.U(2.W), inCap.offset).asSInt // 34-bit zero-extended positive signed
+  val deltaExtS    = Cat(forwardedRs2(31), forwardedRs2(31), forwardedRs2).asSInt // 34-bit sign-extended
   val newOffsetS   = offsetExtS +& deltaExtS
   val capLenExtS   = Cat(0.U(1.W), inCap.length).asSInt // 33-bit positive signed
   val cincOffsetOk = (newOffsetS >= 0.S) && (newOffsetS <= capLenExtS)
@@ -351,6 +370,10 @@ class PipelinedCore(
           exCapViolationAddress := inCap.base + inCap.offset
         }
       }
+      is(CapOp.CCLEAR) {
+        exCapWriteData := CapabilityLite.nullCapability()
+        exCapRegWrite  := true.B
+      }
     }
   }
 
@@ -360,10 +383,11 @@ class PipelinedCore(
   // Result Multiplexing for EX Stage
   val exResult = Mux(exControls.isCapMem, capEffectiveAddress,
                  Mux(exControls.isCapOp, MuxLookup(exControls.capOp, 0.U(32.W))(Seq(
-                   CapOp.CGETBASE -> inCap.base,
-                   CapOp.CGETLEN  -> inCap.length,
-                   CapOp.CGETTAG  -> Cat(0.U(31.W), inCap.tag),
-                   CapOp.CGETPERM -> Cat(0.U(29.W), inCap.perms)
+                   CapOp.CGETBASE   -> inCap.base,
+                   CapOp.CGETLEN    -> inCap.length,
+                   CapOp.CGETTAG    -> Cat(0.U(31.W), inCap.tag),
+                   CapOp.CGETPERM   -> Cat(0.U(29.W), inCap.perms),
+                   CapOp.CGETOFFSET -> inCap.offset
                  )),
                  Mux(exControls.isMul, rv32mMult.io.result,
                  Mux(isDivOp, Mux(exControls.mOp === MOp.DIV || exControls.mOp === MOp.DIVU, divRem.io.quotient, divRem.io.remainder),
@@ -403,8 +427,8 @@ class PipelinedCore(
   }
 
   exMemReg.io.stall := false.B
-  exMemReg.io.flush := false.B
-  exMemReg.io.in.valid                  := exValid && !divHold
+  exMemReg.io.flush := flushEXMEM
+  exMemReg.io.in.valid                  := exValid && !divHold && !flushEXMEM
   exMemReg.io.in.pc                     := exPc
   exMemReg.io.in.pcPlus4                := exPcPlus4
   exMemReg.io.in.instruction            := exInstruction
@@ -464,6 +488,10 @@ class PipelinedCore(
 
   systemMMIO.io.securityEvent := secEvent
 
+  // Objective 2 Phase 8 Combinational Precise Trap & Return Redirects
+  takePreciseTrap := secEvent.valid && systemMMIO.io.trapEnable && !systemMMIO.io.trapActive
+  takeTrapReturn  := systemMMIO.io.takeTrapReturn
+
   // SystemMMIO Interception (suppressed if capability access is denied)
   systemMMIO.io.address     := exMemReg.io.out.aluResult
   systemMMIO.io.memReadReq  := memValid && exMemReg.io.out.memRead && capAccessAllow
@@ -480,9 +508,12 @@ class PipelinedCore(
 
   val memReadData = Mux(systemMMIO.io.windowHit, systemMMIO.io.readData, dmem.io.readData)
 
+  // In Phase 8 precise trap mode, the faulting MEM instruction does NOT enter WB / retire
+  val memEnterWbValid = memValid && !takePreciseTrap
+
   memWbReg.io.stall := false.B
   memWbReg.io.flush := false.B
-  memWbReg.io.in.valid              := memValid
+  memWbReg.io.in.valid              := memEnterWbValid
   memWbReg.io.in.pc                 := memPc
   memWbReg.io.in.pcPlus4            := memPcPlus4
   memWbReg.io.in.instruction        := memInstruction
@@ -490,7 +521,7 @@ class PipelinedCore(
   memWbReg.io.in.aluResult          := exMemReg.io.out.aluResult
   memWbReg.io.in.memReadData        := memReadData
   memWbReg.io.in.imm                := exMemReg.io.out.imm
-  memWbReg.io.in.capRegWrite        := exMemReg.io.out.capRegWrite
+  memWbReg.io.in.capRegWrite        := exMemReg.io.out.capRegWrite && capAccessAllow && !takePreciseTrap
   memWbReg.io.in.capRd              := exMemReg.io.out.capRd
   memWbReg.io.in.capWriteData       := exMemReg.io.out.capWriteData
   memWbReg.io.in.memRead            := memValid && exMemReg.io.out.memRead && capAccessAllow && Mux(systemMMIO.io.windowHit, systemMMIO.io.readAccepted, !dmem.io.misaligned)
@@ -499,10 +530,10 @@ class PipelinedCore(
   memWbReg.io.in.memWriteReq        := memValid && exMemReg.io.out.memWrite
   memWbReg.io.in.memAddress         := exMemReg.io.out.aluResult
   memWbReg.io.in.memWriteData       := exMemReg.io.out.rs2Data
-  memWbReg.io.in.regWrite           := exMemReg.io.out.regWrite && Mux(exMemReg.io.out.memRead, capAccessAllow && Mux(systemMMIO.io.windowHit, systemMMIO.io.readAccepted, !dmem.io.misaligned), true.B)
+  memWbReg.io.in.regWrite           := exMemReg.io.out.regWrite && !takePreciseTrap && Mux(exMemReg.io.out.memRead, capAccessAllow && Mux(systemMMIO.io.windowHit, systemMMIO.io.readAccepted, !dmem.io.misaligned), true.B)
   memWbReg.io.in.wbSource           := exMemReg.io.out.wbSource
   memWbReg.io.in.illegalInstruction := exMemReg.io.out.illegalInstruction
-  memWbReg.io.in.telemetryValid     := exMemReg.io.out.telemetryValid && capAccessAllow
+  memWbReg.io.in.telemetryValid     := exMemReg.io.out.telemetryValid && capAccessAllow && !takePreciseTrap
   memWbReg.io.in.telemetryClaActive := exMemReg.io.out.telemetryClaActive
   memWbReg.io.in.telemetryMulActive := exMemReg.io.out.telemetryMulActive
   memWbReg.io.in.telemetryResult    := exMemReg.io.out.telemetryResult
@@ -608,4 +639,12 @@ class PipelinedCore(
   io.schedHint            := systemMMIO.io.schedHint
   io.processBehaviorClass := systemMMIO.io.processBehaviorClass
   io.currentContext       := systemMMIO.io.currentContext
+
+  // Phase 8 Precise Trap Observability
+  io.trap.trapTaken  := takePreciseTrap
+  io.trap.trapTarget := systemMMIO.io.trapVector
+  io.trap.trapEpc    := systemMMIO.io.trapEpc
+  io.trap.trapCause  := systemMMIO.io.trapCause
+  io.trap.trapAddr   := systemMMIO.io.trapAddr
+  io.trap.trapActive := systemMMIO.io.trapActive
 }

@@ -34,8 +34,12 @@ class HazardUnitIO extends Bundle {
   val exMemCapRegWrite = Input(Bool())
   val exMemCapRd       = Input(UInt(3.W))
 
-  // Branch / Jump redirect from EX stage (higher priority than stall)
+  // Branch / Jump redirect from EX stage
   val branchTaken = Input(Bool())
+
+  // Objective 2 Phase 8 Precise Trap & Return redirects from MEM stage (highest priority)
+  val trapTaken   = Input(Bool())
+  val trapReturn  = Input(Bool())
 
   // Pipeline control outputs
   val loadUseHazard = Output(Bool())
@@ -62,15 +66,16 @@ class HazardUnit extends Module {
     (io.exMemValid && io.exMemCapRegWrite && (io.exMemCapRd === io.idCs1))
   )
 
-  val isStall = (isLoadUse || isCapHazard) && !io.branchTaken
+  val isFlush = io.trapTaken || io.trapReturn || io.branchTaken
+  val isStall = (isLoadUse || isCapHazard) && !isFlush
 
   io.loadUseHazard := isLoadUse
   io.capHazard     := isCapHazard
 
-  // Branch redirect/flush has strict priority over stalls
+  // Redirects and flushes have strict priority over stalls
   io.stallIF   := isStall
   io.stallID   := isStall
 
-  io.flushIFID := io.branchTaken
-  io.flushIDEX := io.branchTaken || isLoadUse || isCapHazard
+  io.flushIFID := isFlush
+  io.flushIDEX := isFlush || isLoadUse || isCapHazard
 }

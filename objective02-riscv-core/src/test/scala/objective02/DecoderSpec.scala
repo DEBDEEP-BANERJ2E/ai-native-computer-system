@@ -231,6 +231,45 @@ class DecoderSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers {
     }
   }
 
+  it should "decode CapabilityLite instructions including CGETOFFSET and CCLEAR" in {
+    test(new Decoder(enableCapabilities = true)) { dut =>
+      // CGETOFFSET x1, c2 -> opcode 0x0B, rd=1, funct3=7, rs1=2, funct7=0x00
+      // 0000000 00010 00001 111 00001 0001011 = 0x0001708B
+      dut.io.instruction.poke("h0001708B".U)
+      dut.io.rd.expect(1.U)
+      dut.io.rs1.expect(2.U)
+      dut.io.controls.isCapOp.expect(true.B)
+      dut.io.controls.capOp.expect(CapOp.CGETOFFSET)
+      dut.io.controls.regWrite.expect(true.B)
+      dut.io.controls.usesCapRs1.expect(true.B)
+      dut.io.controls.illegalInstruction.expect(false.B)
+
+      // CCLEAR c4 -> opcode 0x0B, rd=4, funct3=7, rs1=0, funct7=0x01
+      // 0000001 00000 00000 111 00100 0001011 = 0x0200720B
+      dut.io.instruction.poke("h0200720B".U)
+      dut.io.rd.expect(4.U)
+      dut.io.controls.isCapOp.expect(true.B)
+      dut.io.controls.capOp.expect(CapOp.CCLEAR)
+      dut.io.controls.capRegWrite.expect(true.B)
+      dut.io.controls.illegalInstruction.expect(false.B)
+
+      // Invalid CGETOFFSET with cs1 = 8 (> 7)
+      // 0000000 00000 01000 111 00001 0001011 = 0x0004708B
+      dut.io.instruction.poke("h0004708B".U)
+      dut.io.controls.illegalInstruction.expect(true.B)
+
+      // Invalid CCLEAR with cd = 8 (> 7)
+      // 0000001 00000 00000 111 01000 0001011 = 0x0200740B
+      dut.io.instruction.poke("h0200740B".U)
+      dut.io.controls.illegalInstruction.expect(true.B)
+
+      // Invalid funct7 = 0x02 on funct3 = 7
+      // 0000010 00000 00001 111 00001 0001011 = 0x0400F08B
+      dut.io.instruction.poke("h0400F08B".U)
+      dut.io.controls.illegalInstruction.expect(true.B)
+    }
+  }
+
   it should "comprehensively reject illegal instructions with zero side effects" in {
     test(new Decoder) { dut =>
       // 1. Invalid R-type funct7 (0x05) on ADD
