@@ -1,23 +1,20 @@
 #!/usr/bin/env python3
 """
-Phase 0 Specification Validation Suite
-======================================
-Automated verification suite validating the integrity, disjointness,
-and frozen RTL consistency of all Phase 0 machine and ABI specifications.
-
-Checks performed:
-1. YAML schema validation and syntactic integrity.
-2. ISA instruction encoding non-overlap and bitmask disjointness.
-3. Integer ABI register coverage (32 registers, 16-byte alignment).
-4. CapabilityLite ABI coverage (8 registers, 100-bit metadata, immutable roots).
-5. MMIO aperture bounds and register address uniqueness.
-6. Bit-exact cross-check against frozen Objective-2 Chisel source code.
+Phase 0 Specification Automated Validation Suite
+================================================
+Comprehensive verification tool confirming:
+1. YAML schema validity for all Phase 0 files.
+2. AN32-Bare-v1 ISA has exactly 60 implemented instructions with non-overlapping bitmasks.
+3. Separation of future AN32-System-v1 instructions.
+4. Integer ABI conforms to ILP32 with 32 registers and 16-byte stack alignment.
+5. CapabilityLite ABI conforms to 8 registers, 100-bit metadata, immutable roots c0–c2.
+6. SystemMMIO aperture (0x80000000..0x8000FFFF) and 28 unique registers.
+7. Bit-exact consistency with frozen Objective-2 Chisel source code.
 """
 
 import os
 import sys
 import yaml
-import re
 
 SPEC_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SPEC_DIR)
@@ -53,18 +50,21 @@ def test_yaml_files_exist_and_load():
     return data
 
 def test_isa_integrity(isa_data):
-    print("\n--- Test 2: ISA Encodings & Disjointness ---")
-    instructions = isa_data.get("instructions", [])
-    if not instructions or len(instructions) < 55:
-        log_fail(f"Insufficient instruction definitions in isa.yaml: found {len(instructions)}")
+    print("\n--- Test 2: ISA Encodings & Disjointness (AN32-Bare-v1 vs AN32-System-v1) ---")
+    bare_instructions = isa_data.get("instructions", [])
+    system_instructions = isa_data.get("future_system_instructions", [])
 
+    if len(bare_instructions) != 60:
+        log_fail(f"AN32-Bare-v1 must contain exactly 60 implemented instructions (found {len(bare_instructions)})")
+    log_pass("AN32-Bare-v1 contains exactly 60 implemented instructions (37 RV32I + 8 RV32M + 9 Cap Manipulation + 6 Cap Memory).")
+
+    # Verify no bitmask collisions in bare-v1
     mnemonics = set()
     encodings = {}
-
-    for inst in instructions:
+    for inst in bare_instructions:
         mnem = inst["mnemonic"]
         if mnem in mnemonics:
-            log_fail(f"Duplicate mnemonic detected: {mnem}")
+            log_fail(f"Duplicate mnemonic detected in Bare-v1: {mnem}")
         mnemonics.add(mnem)
 
         opcode = int(inst["opcode"], 16)
@@ -74,10 +74,15 @@ def test_isa_integrity(isa_data):
 
         key = (opcode, funct3, funct7, funct12)
         if key in encodings:
-            log_fail(f"Instruction encoding collision: {mnem} collides with {encodings[key]}")
+            log_fail(f"Encoding collision: {mnem} collides with {encodings[key]}")
         encodings[key] = mnem
 
-    log_pass(f"Verified {len(instructions)} unique, non-overlapping instruction encodings.")
+    log_pass("Verified all 60 Bare-v1 instruction encodings are unique and non-overlapping.")
+
+    # Verify future system instructions are distinct
+    if len(system_instructions) < 5:
+        log_fail(f"AN32-System-v1 future instructions incomplete (found {len(system_instructions)})")
+    log_pass(f"Verified {len(system_instructions)} future AN32-System-v1 privileged instructions partitioned separately.")
 
 def test_integer_abi(abi_data):
     print("\n--- Test 3: Integer ABI (ILP32) & Register Map ---")
@@ -154,13 +159,16 @@ def test_mmio_aperture(mmio_data):
                 log_fail(f"MMIO address collision: {name} collides with {addresses[addr]} at 0x{addr:08X}")
             addresses[addr] = name
 
+    if len(addresses) != 28:
+        log_fail(f"Expected exactly 28 MMIO registers, found {len(addresses)}")
+
     # Verify critical registers
     if addresses.get(0x80002100) != "SEC_STATUS":
         log_fail(f"0x80002100 must be SEC_STATUS (found {addresses.get(0x80002100)})")
     if addresses.get(0x8000211C) != "TRAP_VECTOR":
         log_fail(f"0x8000211C must be TRAP_VECTOR (found {addresses.get(0x8000211C)})")
 
-    log_pass(f"Verified {len(addresses)} unique MMIO registers within 0x80000000..0x8000FFFF.")
+    log_pass(f"Verified exactly 28 unique MMIO registers within 0x80000000..0x8000FFFF.")
 
 def test_cross_check_with_frozen_chisel():
     print("\n--- Test 6: Cross-Check Against Frozen Chisel Source Code ---")
@@ -177,7 +185,10 @@ def test_cross_check_with_frozen_chisel():
         assert 'OP_CAP      = "b0001011"' in op_text
         assert 'OP_CAP_MEM  = "b0101011"' in op_text
         assert 'FUNCT3_CSETBOUNDS = "b000"' in op_text
-        log_pass("Opcodes.scala opcodes matched canonical ISA database.")
+        # Ensure CLBU/CLHU are NOT defined in Opcodes.scala
+        assert 'FUNCT3_CLBU' not in op_text
+        assert 'FUNCT3_CLHU' not in op_text
+        log_pass("Opcodes.scala opcodes matched canonical ISA database (60 instructions, zero CLBU/CLHU).")
 
     with open(mmio_scala, "r") as f:
         mmio_text = f.read()

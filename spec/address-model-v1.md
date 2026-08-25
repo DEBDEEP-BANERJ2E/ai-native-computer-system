@@ -62,7 +62,7 @@ Secondary Storage Block / Swap LBA (Paging Tier)
 | **Physical Page Number (PPN)** | `PPN[21:0]` (22 bits) | Sv32 Page Table Walker | Physical frame number identifying a 4-KiB frame in physical memory. |
 | **34-Bit Physical Address (PA)** | `PA[33:0]` | Memory Controller / Cache | Actual hardware physical address sent to cache and memory bus. |
 | **MMIO Physical Address** | `0x80000000`–`0x8000FFFF` | SystemMMIO Bus | Hardware registers, telemetry counters, and precise trap controllers. |
-| **Capability Effective Address** | `c.base + c.offset + imm` | CapabilityChecker | Bounded pointer address verified against spatial capability metadata. |
+| **Capability Effective Address** | `c.base + c.offset + imm` | CapabilityChecker | Bounded pointer address verified against spatial capability metadata (applies to `CL*`/`CS*`). |
 | **Cache Set / Tag Address** | `[Tag:20][Set:6][Offset:6]` | L1 / L2 Cache Controllers | Cache index and tag bits used for fast hardware line lookups. |
 | **Storage Block Address (LBA)** | Sector Index (512B/4KB) | Objective 4 Block Device | Secondary storage block address for file storage and paged-out swap. |
 
@@ -76,21 +76,22 @@ The system implements two completely separate, orthogonal protection mechanisms.
 Memory Reference (Effective VA)
           │
           ▼
-1. CapabilityLite Check ──── (Bounds exceeded / Tag == 0 / Perm violation)
+1. CapabilityLite Check ──── (Bounds exceeded / Tag == 0 / Perm violation on CL*/CS*)
           │                                  │
           │                                  ▼
           │                   CAPABILITY FAULT (Precise Security Trap)
-          │                   Cause: TRAP_CAP_BOUNDS, TRAP_CAP_PERM, etc.
+          │                   AN32-Bare-v1: TRAP_CAUSE = (accessType << 4) | reason
+          │                   AN32-System-v1: scause = 24..29 (Custom RISC-V Range)
           ▼
 2. Sv32 MMU Page Check ───── (PTE.V == 0 / PTE.U == 0 in user mode / PTE.W == 0 on store)
           │                                  │
           │                                  ▼
           │                   PAGE FAULT (OS Virtual Memory Exception)
-          │                   Cause: Instruction / Load / Store Page Fault
+          │                   AN32-System-v1: scause = 12 (Inst), 13 (Load), 15 (Store)
           ▼
 3. Physical RAM / Cache Access
 ```
 
 ### Key Differences:
-- **Capability Faults** represent **security violations** against bounded object authority. They immediately vector to `TRAP_VECTOR` with atomic writeback suppression.
+- **Capability Faults** represent **security violations** against bounded object authority. In Bare-v1, they redirect the PC to the handler address stored in `TRAP_VECTOR` (default `0x00000800`) with atomic writeback suppression.
 - **Page Faults** represent **operating system virtual memory events** (e.g. demand paging, copy-on-write, page allocation). The OS handles them by allocating a physical frame, updating page tables, and restarting the instruction.
