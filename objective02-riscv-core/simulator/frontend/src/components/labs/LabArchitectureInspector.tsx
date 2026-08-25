@@ -91,6 +91,26 @@ export const LabArchitectureInspector: React.FC = () => {
         </p>
       </div>
 
+      {/* Hardware Architecture Schematic Reference */}
+      <div className="glass-panel" style={{ background: "#0d1117", textAlign: "center" }}>
+        <div className="panel-header" style={{ marginBottom: "12px" }}>
+          <span className="panel-title" style={{ color: "var(--accent-cyan)" }}>
+            <FileCode size={16} color="var(--accent-cyan)" />
+            Top-Level RV32IM Pipelined Processor & Capability Security Architecture
+          </span>
+          <span style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+            Hardware System Blueprint
+          </span>
+        </div>
+        <div style={{ padding: "8px", background: "#fff", borderRadius: "10px", overflow: "hidden", display: "inline-block", maxWidth: "100%", boxShadow: "0 8px 32px rgba(0,0,0,0.6)" }}>
+          <img
+            src="/rv32im_capability_architecture.png"
+            alt="Hardware Architecture Blueprint"
+            style={{ width: "100%", maxWidth: "1050px", height: "auto", display: "block", borderRadius: "6px" }}
+          />
+        </div>
+      </div>
+
       {/* Snippet Picker */}
       <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
         {SNIPPETS.map((s) => (

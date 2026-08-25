@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Cpu, Shield, Layers, HelpCircle, FileCode, CheckCircle2, ChevronRight, X, Zap } from "lucide-react";
+import { Cpu, Shield, Layers, HelpCircle, FileCode, CheckCircle2, ChevronRight, X, Zap, Image as ImageIcon } from "lucide-react";
 import { InteractiveDatapath } from "../InteractiveDatapath";
 import { SimulationState } from "../../types";
 
@@ -144,6 +144,7 @@ interface Lab1Props {
 }
 
 export const Lab1ArchExplorer: React.FC<Lab1Props> = ({ state }) => {
+  const [viewMode, setViewMode] = useState<"datapath" | "schematic">("datapath");
   const [selectedModule, setSelectedModule] = useState<ModuleDetail>(MODULE_DETAILS["EX"] || MODULE_DETAILS["ALU"]);
 
   const handleSelectModuleFromDatapath = (moduleId: string) => {
@@ -154,20 +155,93 @@ export const Lab1ArchExplorer: React.FC<Lab1Props> = ({ state }) => {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-      {/* Intro Banner */}
+      {/* Intro Banner with View Mode Switcher */}
       <div className="glass-panel">
-        <h2 style={{ fontSize: "18px", fontWeight: 700, marginBottom: "8px", color: "var(--accent-cyan)", display: "flex", alignItems: "center", gap: "8px" }}>
-          <Layers size={20} />
-          Lab 1: Full Processor Datapath Architecture Explorer & Circuit Probe
-        </h2>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", marginBottom: "8px" }}>
+          <h2 style={{ fontSize: "18px", fontWeight: 700, color: "var(--accent-cyan)", display: "flex", alignItems: "center", gap: "8px" }}>
+            <Layers size={20} />
+            Lab 1: Full Processor Datapath Architecture Explorer & Circuit Probe
+          </h2>
+
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button
+              className={`btn ${viewMode === "datapath" ? "btn-primary" : "btn-secondary"}`}
+              style={{ fontSize: "12px", padding: "6px 12px" }}
+              onClick={() => setViewMode("datapath")}
+            >
+              <Cpu size={14} /> Interactive Circuit Probe
+            </button>
+            <button
+              className={`btn ${viewMode === "schematic" ? "btn-primary" : "btn-secondary"}`}
+              style={{ fontSize: "12px", padding: "6px 12px" }}
+              onClick={() => setViewMode("schematic")}
+            >
+              <ImageIcon size={14} /> Complete Hardware Schematic
+            </button>
+          </div>
+        </div>
+
         <p style={{ color: "var(--text-secondary)", fontSize: "13px", lineHeight: "1.6" }}>
-          Explore the complete 5-stage architectural datapath of the frozen <strong>Objective 2 RV32IM Pipelined Processor</strong>.
-          Click any component on the visual schematic below to probe its internal signals, ports, and design rationale.
+          Explore the complete 5-stage architectural datapath of the frozen <strong>Objective 2 RV32IM Pipelined Processor</strong> with Capability Security and Precise Trap Subsystem.
         </p>
       </div>
 
-      {/* Interactive SVG Datapath Schematic */}
-      {state && <InteractiveDatapath state={state} onSelectModule={handleSelectModuleFromDatapath} />}
+      {/* View Mode 1: Interactive SVG Datapath */}
+      {viewMode === "datapath" && state && (
+        <InteractiveDatapath state={state} onSelectModule={handleSelectModuleFromDatapath} />
+      )}
+
+      {/* View Mode 2: Complete Hardware Architecture Schematic Image */}
+      {viewMode === "schematic" && (
+        <div className="glass-panel" style={{ textAlign: "center", background: "#0d1117" }}>
+          <div className="panel-header" style={{ marginBottom: "12px" }}>
+            <div className="panel-title">
+              <ImageIcon size={18} color="var(--accent-cyan)" />
+              <span>Objective 2 RV32IM 5-Stage Pipelined Processor Architecture & Capability Security Map</span>
+            </div>
+            <span style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+              High-Resolution Hardware Schematic
+            </span>
+          </div>
+
+          <div style={{ padding: "8px", background: "#fff", borderRadius: "10px", overflow: "hidden", display: "inline-block", maxWidth: "100%", boxShadow: "0 8px 32px rgba(0,0,0,0.6)" }}>
+            <img
+              src="/rv32im_capability_architecture.png"
+              alt="Objective 2 RV32IM Pipelined Processor Architecture Diagram"
+              style={{
+                width: "100%",
+                maxWidth: "1100px",
+                height: "auto",
+                display: "block",
+                borderRadius: "6px",
+              }}
+            />
+          </div>
+
+          <div style={{ marginTop: "16px", display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "10px", textAlign: "left", fontSize: "11px", fontFamily: "var(--font-mono)" }}>
+            <div style={{ background: "rgba(0,0,0,0.4)", padding: "10px", borderRadius: "8px", border: "1px solid var(--border-subtle)" }}>
+              <span style={{ color: "#38bdf8", fontWeight: 700 }}>── Data Path</span>
+              <div style={{ color: "var(--text-muted)", fontSize: "10px", marginTop: "4px" }}>Solid black arrows: Instruction, register & memory payloads</div>
+            </div>
+            <div style={{ background: "rgba(0,0,0,0.4)", padding: "10px", borderRadius: "8px", border: "1px solid var(--border-subtle)" }}>
+              <span style={{ color: "#a855f7", fontWeight: 700 }}>-- Control / Hazard</span>
+              <div style={{ color: "var(--text-muted)", fontSize: "10px", marginTop: "4px" }}>Purple dashed: Forwarding, load-use stall & branch flush</div>
+            </div>
+            <div style={{ background: "rgba(0,0,0,0.4)", padding: "10px", borderRadius: "8px", border: "1px solid var(--border-subtle)" }}>
+              <span style={{ color: "#3b82f6", fontWeight: 700 }}>-- Redirect / Flush</span>
+              <div style={{ color: "var(--text-muted)", fontSize: "10px", marginTop: "4px" }}>Blue dashed: Branch / jump redirection to PC</div>
+            </div>
+            <div style={{ background: "rgba(0,0,0,0.4)", padding: "10px", borderRadius: "8px", border: "1px solid var(--border-subtle)" }}>
+              <span style={{ color: "#f59e0b", fontWeight: 700 }}>-- MMIO / Intercept</span>
+              <div style={{ color: "var(--text-muted)", fontSize: "10px", marginTop: "4px" }}>Orange dashed: System MMIO & telemetry interconnect</div>
+            </div>
+            <div style={{ background: "rgba(0,0,0,0.4)", padding: "10px", borderRadius: "8px", border: "1px solid var(--border-subtle)" }}>
+              <span style={{ color: "#ef4444", fontWeight: 700 }}>-- Security / Trap</span>
+              <div style={{ color: "var(--text-muted)", fontSize: "10px", marginTop: "4px" }}>Red dashed: Precise trap vectoring & CSR logging</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Module Inspector Drawer */}
       {selectedModule && (
