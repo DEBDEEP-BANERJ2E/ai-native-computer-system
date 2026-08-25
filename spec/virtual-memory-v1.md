@@ -29,8 +29,8 @@ The AN32-System-v1 architecture implements the canonical **Sv32** page-based vir
 │         12 bits         │     10 bits      │        12 bits         │
 └─────────────────────────┴──────────────────┴────────────────────────┘
 ```
-- **Physical Address Width**: 34 bits (supporting up to 16 GiB of physical space).
-- Memory below 4 GiB houses physical RAM and the legacy SystemMMIO window (`0x80000000`–`0x8000FFFF`).
+- **Physical Address Width**: 34 bits (supporting up to 16 GiB of physical memory).
+- Lower 4 GiB space maps physical RAM and the legacy SystemMMIO window (`0x80000000`–`0x8000FFFF`).
 
 ---
 
@@ -57,40 +57,27 @@ The AN32-System-v1 architecture implements the canonical **Sv32** page-based vir
 | `9:8` | **RSW** | Reserved for operating system software use. |
 | `31:10`| **PPN** | Physical Page Number (22 bits: `PPN[1]` = 12 bits, `PPN[0]` = 10 bits). |
 
-### 2.1 Leaf vs Non-Leaf PTE Encoding
+---
+
+## 3. Translation Walk & Policy Decisions
+
+### 3.1 Leaf vs Non-Leaf PTE Rules
 - **Non-Leaf Pointer PTE** (`R=0, W=0, X=0, V=1`): Points to next-level page table. `PPN` field holds the physical frame number of the Level-0 page table.
 - **Leaf Data/Code PTE** (`R=1` or `X=1`, `V=1`): Directly maps a 4-KiB frame (at Level 0) or a 4-MiB superpage (at Level 1).
 - **Reserved / Illegal Encodings**: `W=1, R=0` is reserved and immediately raises a Page Fault.
+- **Superpage Alignment Invariant**: For a Level-1 superpage leaf PTE, `PPN[0]` must be zero (`PTE.PPN[9:0] == 0`). A non-zero `PPN[0]` indicates a misaligned superpage and raises a Page Fault.
 
----
+### 3.2 Access & Dirty (A/D) Bit Management Policy
+- **Hardware-Managed A/D Updates**: The AN32-System-v1 hardware page-table walker automatically sets `A := 1` in memory on any successful read/write/fetch, and sets `D := 1` on any successful write access.
+- If memory write protection prevents atomic hardware update, the walker raises an appropriate Page Fault (`scause = 13` Load Page Fault or `15` Store Page Fault) for OS resolution.
 
-## 3. Two-Level Page Table Translation Walk
-
-```
-                   Virtual Address (VA)
-                            │
-               ┌────────────┴────────────┐
-               ▼                         ▼
-            VPN[1]                    VPN[0]
-               │                         │
-               ▼                         ▼
-   satp.PPN ──► Level-1 Page Table       │
-                     │ (PTE1)            │
-                     ▼                   ▼
-                Is Leaf PTE? ──No──► Level-0 Page Table
-                     │                     │ (PTE0)
-                    Yes                    ▼
-                     │                 Check Permissions (R/W/X/U/V)
-                     │                     │
-                     ▼                     ▼
-                4-MiB Superpage      4-KiB Physical Frame
-                     │                     │
-                     └──────────┬──────────┘
-                                ▼
-                      + VA Page Offset (12 bits)
-                                ▼
-                       34-bit Physical Address (PA)
-```
+### 3.3 Privilege & Memory Protection Policies (SUM and MXR)
+- **`sstatus.SUM` (permit Supervisor User Memory access)**:
+  - When `sstatus.SUM == 0`, S-mode loads and stores to pages with `PTE.U == 1` raise a Page Fault. This prevents kernel privilege-escalation bugs.
+  - When `sstatus.SUM == 1`, S-mode is permitted to read/write user pages.
+- **`sstatus.MXR` (Make Executable Readable)**:
+  - When `sstatus.MXR == 0`, loads to pages with `PTE.X == 1, PTE.R == 0` raise a Load Page Fault.
+  - When `sstatus.MXR == 1`, loads to executable pages succeed even if `PTE.R == 0`.
 
 ---
 
@@ -98,7 +85,7 @@ The AN32-System-v1 architecture implements the canonical **Sv32** page-based vir
 
 1. **TLB Miss vs Page Fault**:
    - A **TLB Miss** is not an exception: it invokes the hardware page-table walker to fetch the PTE from RAM.
-   - If the walker finds `PTE.V == 0`, privilege mismatch (`PTE.U == 0` when in U-mode), permission failure (`PTE.W == 0` on store, `PTE.X == 0` on fetch), or misaligned superpage, a **Page Fault** is raised to the OS kernel.
+   - If the walker finds `PTE.V == 0`, privilege mismatch (`PTE.U == 0` in U-mode or `PTE.U == 1` in S-mode when `SUM=0`), permission failure (`PTE.W == 0` on store, `PTE.X == 0` on fetch), or misaligned superpage, a **Page Fault** is raised to the OS kernel.
 2. **Page Fault Exception Codes (`scause` / `mcause`)**:
    - `12`: Instruction Page Fault
    - `13`: Load Page Fault

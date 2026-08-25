@@ -8,7 +8,7 @@ capability_model:
     tag: { width: 1, description: "1 = Valid, 0 = Invalid/NULL" }
     base: { width: 32, description: "32-bit spatial base address" }
     length: { width: 32, description: "32-bit bounded buffer length in bytes" }
-    perms: { width: 3, description: "Bit 0: Read (1), Bit 1: Write (2), Bit 2: Exec (4)" }
+    perms: { width: 3, description: "Bit 0: Read (1), Bit 1: Write (2), Bit 2: Exec (4, reserved)" }
     offset: { width: 32, description: "32-bit current cursor offset from base" }
 
 registers:
@@ -88,9 +88,27 @@ conventions:
     callee_saved: "cs0 (c6), cs1 (c7) must be preserved and restored by any callee modifying them."
 
   context_switching:
-    task_state_size: "5 x 100-bit registers (c3–c7) saved in process control block (PCB)."
-    memory_representation: "Each 100-bit capability stored as 16 bytes: [offset:4B][base:4B][length:4B][perms:1B + tag:1B + pad:2B]."
-    total_cap_context_bytes: 80 # 5 * 16 bytes
-
-  trap_handling:
-    preservation: "Hardware freezes execution on precise trap. OS trap handler preserves active process capabilities in PCB before handling or modifying c3–c7."
+    security_invariant: >
+      CapabilityLite operates on a pure untagged data memory datapath.
+      Ordinary RAM words cannot store authoritative hardware capability tags.
+      Therefore, serialized capability bytes in the Process Control Block (PCB)
+      represent descriptive software metadata only.
+    pcb_slot_layout_16bytes:
+      offset_0x00: "uint32_t offset"
+      offset_0x04: "uint32_t base"
+      offset_0x08: "uint32_t length"
+      offset_0x0C: "uint8_t  perms"
+      offset_0x0D: "uint8_t  tag (descriptive metadata only)"
+      offset_0x0E: "uint8_t  root_selector (0=NULL, 1=RAM_ROOT c1, 2=MMIO_ROOT c2)"
+      offset_0x0F: "uint8_t  reserved_padding"
+    restoration_protocol:
+      valid_capability: >
+        If PCB tag == 1, the OS kernel restores authority by selecting the trusted
+        immutable root (c1 or c2) and executing hardware derivation:
+        1. CSETBOUNDS cd, c_root, pcb.length
+        2. CANDPERM   cd, cd,     pcb.perms
+        3. CINCOFFSET cd, cd,     pcb.offset
+        Hardware verifies monotonic containment and sets tag := 1.
+      invalid_capability: >
+        If PCB tag == 0, the OS executes CCLEAR cd to set tag := 0.
+    total_cap_context_bytes: 80 # 5 process registers (c3–c7) * 16 bytes

@@ -7,10 +7,11 @@ aperture:
   size_bytes: 65536
   access_alignment_bytes: 4
   bus_latency_cycles: 1
+  address_match_rule: "address[31:16] == 0x8000"
 
 windows:
   # ===========================================================================
-  # 1. Objective 1 Telemetry Subsystem Window (0x80001000 - 0x80001010)
+  # 1. Objective 1 Telemetry Subsystem Window (0x80001000 - 0x80001010) [5 regs]
   # ===========================================================================
   - name: "Objective 1 Telemetry Block"
     base: "0x80001000"
@@ -47,7 +48,7 @@ windows:
         description: "Delay/configuration scale constant (RO=1)"
 
   # ===========================================================================
-  # 2. Objective 2 System Control & Performance Counters (0x80002000 - 0x80002024)
+  # 2. Objective 2 System Control & Performance Counters (0x80002000 - 0x80002024) [10 regs]
   # ===========================================================================
   - name: "Objective 2 Core Control & Performance Counters"
     base: "0x80002000"
@@ -114,7 +115,7 @@ windows:
         description: "Active OS task/thread context ID (Reset=0)"
 
   # ===========================================================================
-  # 3. Objective 2 Security Event Sticky Logger (0x80002100 - 0x80002110)
+  # 3. Objective 2 Security Event Sticky Logger (0x80002100 - 0x80002110) [5 regs]
   # ===========================================================================
   - name: "Objective 2 Security Event Logger"
     base: "0x80002100"
@@ -142,7 +143,11 @@ windows:
         name: "SEC_INFO"
         access: "RO"
         reset_value: "0x00000000"
-        description: "[5:4] accessType (0:Read, 1:Write, 2:Exec), [3:0] reason code (0:None, 1:Tag, 2:Bounds, 3:Perm, 4:Monotonic)"
+        description: >
+          [5:4] accessType: 0 (READ), 1 (WRITE), 2 (EXECUTE).
+          [3:0] reason: 0 (NONE), 1 (INVALID_CAPABILITY), 2 (BOUNDS),
+                        3 (READ_PERMISSION), 4 (WRITE_PERMISSION),
+                        5 (EXECUTE_PERMISSION), 6 (MONOTONICITY).
 
       - address: "0x80002110"
         name: "SEC_CONTEXT"
@@ -151,7 +156,7 @@ windows:
         description: "Process context ID active at violation time"
 
   # ===========================================================================
-  # 4. Objective 2 Precise Security Trapping Subsystem (0x80002114 - 0x80002130)
+  # 4. Objective 2 Precise Security Trapping Subsystem (0x80002114 - 0x80002130) [8 regs]
   # ===========================================================================
   - name: "Objective 2 Precise Security Trap Subsystem"
     base: "0x80002114"
@@ -160,8 +165,8 @@ windows:
       - address: "0x80002114"
         name: "TRAP_CONTROL"
         access: "RW"
-        reset_value: "0x00000001" # Default enabled
-        description: "Bit 0: TRAP_ENABLE (1 = precise traps active)"
+        reset_value: "0x00000000" # trapEnableReg = RegInit(false.B) in frozen RTL
+        description: "Bit 0: TRAP_ENABLE (1 = precise traps active, 0 = disabled). Resets to 0."
 
       - address: "0x80002118"
         name: "TRAP_STATUS"
@@ -172,20 +177,25 @@ windows:
       - address: "0x8000211C"
         name: "TRAP_VECTOR"
         access: "RW"
-        reset_value: "0x00000800" # 4-byte aligned reset base
-        description: "Base address of OS trap handler routine"
+        reset_value: "0x00000800" # 4-byte aligned reset base target PC
+        description: "Base PC of OS trap handler routine (Processor jumps to [TRAP_VECTOR] on trap)"
 
       - address: "0x80002120"
         name: "TRAP_EPC"
         access: "RW"
         reset_value: "0x00000000"
-        description: "Exception Program Counter (PC of faulting instruction in MEM stage)"
+        description: "Exception Program Counter (PC of faulting instruction in MEM stage; writable when ACTIVE)"
 
       - address: "0x80002124"
         name: "TRAP_CAUSE"
         access: "RO"
         reset_value: "0x00000000"
-        description: "Trap cause code: [5:4] accessType, [3:0] reason (0x10: Bounds, 0x11: Perm, 0x12: Deriv, 0x13: Seal, 0x14: Invalid Tag)"
+        description: >
+          Hardware-packed trap cause: Cat(0.U(26.W), accessType, reason).
+          [5:4] accessType: 0 (READ), 1 (WRITE), 2 (EXECUTE).
+          [3:0] reason: 0 (NONE), 1 (INVALID_CAPABILITY), 2 (BOUNDS),
+                        3 (READ_PERMISSION), 4 (WRITE_PERMISSION),
+                        5 (EXECUTE_PERMISSION), 6 (MONOTONICITY).
 
       - address: "0x80002128"
         name: "TRAP_ADDR"
@@ -204,3 +214,32 @@ windows:
         access: "WO"
         reset_value: "0x00000000"
         description: "Write 1 to return from trap handler (clears ACTIVE, vectors PC -> TRAP_EPC)"
+
+# =============================================================================
+# 5. Future AN32-System-v1 Extended System Bus MMIO Peripherals (Separate Section)
+# In System-v1, a top-level System Bus Decoder multiplexes SystemMMIO and new peripherals:
+# =============================================================================
+system_v1_extended_peripherals:
+  - name: "Real-Time Machine Timer Block (MTIME)"
+    base: "0x80003000"
+    end: "0x8000300C"
+    registers:
+      - address: "0x80003000"
+        name: "MTIME_LO"
+        access: "RO"
+        description: "Lower 32 bits of free-running 64-bit real-time clock cycle counter"
+      - address: "0x80003004"
+        name: "MTIME_HI"
+        access: "RO"
+        description: "Upper 32 bits of free-running 64-bit real-time clock cycle counter"
+      - address: "0x80003008"
+        name: "MTIMECMP_LO"
+        access: "RW"
+        description: "Lower 32 bits of 64-bit timer comparator register"
+      - address: "0x8000300C"
+        name: "MTIMECMP_HI"
+        access: "RW"
+        description: "Upper 32 bits of 64-bit timer comparator register"
+    atomic_access_protocol:
+      read_64bit: "Loop: read MTIME_HI -> read MTIME_LO -> read MTIME_HI; repeat if high word rolled over."
+      write_64bit: "Write 0xFFFFFFFF to MTIMECMP_LO -> write new value to MTIMECMP_HI -> write new value to MTIMECMP_LO."

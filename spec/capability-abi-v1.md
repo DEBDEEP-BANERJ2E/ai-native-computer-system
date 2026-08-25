@@ -50,31 +50,45 @@ Because there are exactly five writable capability registers (`c3`–`c7`), stri
 2. **Returning Capabilities from Functions**:
    - Memory allocation functions (e.g. `malloc`, `derive_buffer`) return the newly bounded capability in `ca0` (`c3`).
 3. **Preserving Callee-Saved Capabilities**:
-   - Functions that overwrite `cs0` (`c6`) or `cs1` (`c7`) must spill them to the stack using `CSW` instructions and restore them before returning.
+   - Functions that overwrite `cs0` (`c6`) or `cs1` (`c7`) must spill them to the stack and restore them before returning.
 
 ---
 
-## 4. Process Context Switching & PCB Layout
+## 4. Secure Process Context Switching & PCB Serialization
 
-In an operating system context switch, the OS kernel saves the 5 writable process capability registers (`c3`–`c7`).
+> [!CRITICAL]
+> **Capability Unforgeability Invariant**: CapabilityLite operates on untagged memory. Ordinary RAM words cannot hold authoritative hardware capability tags. Storing a byte `tag=1` in memory never manufactures a valid capability.
 
-### Memory Representation per Capability (16 Bytes)
-Each 100-bit capability is serialized into a 16-byte aligned slot in the Process Control Block (PCB):
-```
-Offset +0x00:  uint32_t  offset;
-Offset +0x04:  uint32_t  base;
-Offset +0x08:  uint32_t  length;
-Offset +0x0C:  uint8_t   perms;
-Offset +0x0D:  uint8_t   tag;
-Offset +0x0E:  uint16_t  reserved_padding;
+### 4.1 Memory Representation per Capability (16 Bytes in PCB)
+```c
+typedef struct {
+    uint32_t offset;        /* Byte offset from base */
+    uint32_t base;          /* Spatial base address */
+    uint32_t length;        /* Bounded length in bytes */
+    uint8_t  perms;         /* Read (1), Write (2), Exec (4) */
+    uint8_t  tag;           /* Descriptive metadata only */
+    uint8_t  root_selector; /* 0 = NULL (c0), 1 = RAM_ROOT (c1), 2 = MMIO_ROOT (c2) */
+    uint8_t  reserved;      /* Padding */
+} CapSlot_t;
 ```
 
 $$\text{Total Capability Context per PCB} = 5 \times 16\text{ bytes} = 80\text{ bytes}$$
 
----
+### 4.2 Hardware Re-Derivation Restoration Protocol
+When context switching to a task:
+1. **Valid Capability (`pcb.tag == 1`)**:
+   The OS kernel inspects `root_selector` and derives the target register from the trusted immutable root:
+   ```assembly
+   # Example restoring process data capability c3 from c1 (RAM_ROOT)
+   csetbounds c3, c1, a2    # a2 = pcb.length
+   candperm   c3, c3, a3    # a3 = pcb.perms
+   cincoffset c3, c3, a0    # a0 = pcb.offset
+   ```
+   Hardware automatically verifies monotonic containment against `c1`/`c2` and sets `tag := 1`.
+2. **Invalid / NULL Capability (`pcb.tag == 0`)**:
+   The OS kernel clears the register using the hardware clear instruction:
+   ```assembly
+   cclear     c3            # Sets c3 tag := 0, base := 0, length := 0, perms := 0
+   ```
 
-## 5. Interaction with Traps & Exceptions
-
-1. On a precise capability security violation (`takePreciseTrap`), the hardware combinationally suppresses the faulting instruction's writeback and saves fault metadata into `TRAP_*` registers.
-2. The OS trap handler reads `TRAP_EPC` and `TRAP_CAUSE` without mutating `c3`–`c7` until the process context is securely checkpointed.
-3. Returning from a trap via `TRAP_RETURN` resumes execution at `TRAP_EPC` with the restored capability register file.
+This guarantees that a compromised process modifying its own memory cannot forge authority beyond what is rooted in `c1` or `c2`.

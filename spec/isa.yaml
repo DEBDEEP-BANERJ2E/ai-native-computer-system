@@ -614,63 +614,80 @@ instructions:
 
 # =============================================================================
 # AN32-SYSTEM-V1: FORWARD PRIVILEGED SYSTEM INSTRUCTIONS (SEPARATE SPECIFICATION)
-# Note: These instructions are illegal in AN32-Bare-v1 and are part of the forward OS target.
+# Fixed-field encodings specified exactly according to RISC-V Privileged Architecture.
 # =============================================================================
 future_system_instructions:
   - mnemonic: "ecall"
-    format: "I"
+    format: "SYSTEM_FIXED"
     opcode: "0x73"
     funct3: "0x0"
     funct12: "0x000"
+    fixed_rd: "x0 (0)"
+    fixed_rs1: "x0 (0)"
+    exact_word: "0x00000073"
     operands: ""
     description: "Environment Call: User/Supervisor system call trigger"
     cycles: 2
     profile: "AN32-System-v1"
 
   - mnemonic: "ebreak"
-    format: "I"
+    format: "SYSTEM_FIXED"
     opcode: "0x73"
     funct3: "0x0"
     funct12: "0x001"
+    fixed_rd: "x0 (0)"
+    fixed_rs1: "x0 (0)"
+    exact_word: "0x00100073"
     operands: ""
     description: "Environment Break: Software breakpoint exception"
     cycles: 2
     profile: "AN32-System-v1"
 
-  - mnemonic: "mret"
-    format: "I"
-    opcode: "0x73"
-    funct3: "0x0"
-    funct12: "0x302"
-    operands: ""
-    description: "Machine-Mode Return from Trap"
-    cycles: 2
-    profile: "AN32-System-v1"
-
   - mnemonic: "sret"
-    format: "I"
+    format: "SYSTEM_FIXED"
     opcode: "0x73"
     funct3: "0x0"
     funct12: "0x102"
+    fixed_rd: "x0 (0)"
+    fixed_rs1: "x0 (0)"
+    exact_word: "0x10200073"
     operands: ""
     description: "Supervisor-Mode Return from Trap"
     cycles: 2
     profile: "AN32-System-v1"
 
-  - mnemonic: "sfence.vma"
-    format: "R"
+  - mnemonic: "mret"
+    format: "SYSTEM_FIXED"
     opcode: "0x73"
     funct3: "0x0"
-    funct7: "0x09"
-    operands: "rs1, rs2"
-    description: "TLB Invalidation / Memory-Management Fence (rs1=vaddr, rs2=asid)"
+    funct12: "0x302"
+    fixed_rd: "x0 (0)"
+    fixed_rs1: "x0 (0)"
+    exact_word: "0x30200073"
+    operands: ""
+    description: "Machine-Mode Return from Trap"
+    cycles: 2
+    profile: "AN32-System-v1"
+
+  - mnemonic: "sfence.vma"
+    format: "SYSTEM_R"
+    opcode: "0x73"
+    funct3: "0x0"
+    funct7: "0x09" # 7'b0001001
+    fixed_rd: "x0 (0)"
+    operands: "rs1, rs2" # rs1 = vaddr, rs2 = asid
+    description: "TLB Invalidation / Memory-Management Fence (rd=x0)"
     cycles: 2
     profile: "AN32-System-v1"
 
   - mnemonic: "fence.i"
-    format: "I"
+    format: "SYSTEM_FIXED"
     opcode: "0x0F"
     funct3: "0x1"
+    fixed_rd: "x0 (0)"
+    fixed_rs1: "x0 (0)"
+    fixed_imm: "0x000"
+    exact_word: "0x0000100F"
     operands: ""
     description: "Instruction-Fetch / Instruction-Cache Synchronization Fence"
     cycles: 2
