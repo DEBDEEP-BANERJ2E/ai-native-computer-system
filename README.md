@@ -199,14 +199,22 @@ they are not intended as the final CPU interface.
 
 ## Roadmap
 
-- **Objective 2 Phase 8 (Upcoming Security Trapping & Freeze)**:
-  - Synchronous hardware security exception vectoring and trap handler redirection.
-  - OS capability context save/restore abstraction (`CURRENT_CONTEXT` domain isolation).
-  - Security attack & exploit mitigation evaluation benchmark suite.
-  - Hardware/OS co-design interface freeze for Objective 3 (Adaptive OS Scheduler) and Objective 8 (Unified Security).
-- **Downstream Cross-Layer Integration (Objectives 3–10)**:
-  - OS kernel adaptation driven by hardware telemetry and MMIO counters.
-  - Hierarchical tiered memory management and compiler feedback loops.
+- **Objective 1: Digital Logic & Arithmetic Foundation** — **COMPLETED & FROZEN** (`objective1-freeze-v1.0`)
+  - Reversible logic, parameterized adders (RCA, Flat CLA, 4-bit block Hierarchical CLA), high-throughput multipliers (Booth-Wallace 34-bit), 32-bit ALU, and real-time hardware telemetry.
+- **Objective 2: RISC-V RV32IM Processor Core, System MMIO & CapabilityLite Security** — **COMPLETED & FROZEN** (`objective2-freeze-v1.0`)
+  - Full 5-stage hazard-forwarding pipelined core + baseline SingleCycleCore.
+  - Complete RV32M hardware multiplier & 33-cycle restoring iterative divider with trap abort.
+  - Cross-layer System MMIO, hardware telemetry, performance counters, and OS scheduler context registers.
+  - CapabilityLite 101-bit hardware security, 33-bit widened bounds checking, and immutable roots.
+  - Precise exception model, atomic writeback suppression, younger-stage squashing, and trap vectoring.
+  - 108 Chisel tests (100% green) + 18 cross-model differential verification benchmark suites (223 retirement points verified).
+  - Interactive RVSecure Workbench observatory (`http://localhost:5174`).
+- **Objective 3: Intelligent Operating System & Adaptive Resource Manager** — **UPCOMING / ACTIVE**:
+  - Baseline process scheduler and task manager utilizing hardware MMIO registers.
+  - Dynamic CPU core allocation adapting to real-time hardware telemetry (`CLA_SWITCHING`, `EDP_CURRENT`, `LOAD_USE_STALL_COUNT`).
+  - Lightweight ML runtime model driven by thread behavioral classification (`PROCESS_BEHAVIOR_CLASS`, `SCHED_HINT`).
+- **Downstream Cross-Layer Integration (Objectives 4–10)**:
+  - Intelligent tiered memory hierarchy, compiler optimization feedback loops, learned database indexes, high-performance network stack, unified security, full-system evaluation, and AgentOS authorization.
 
 ## Visualization
 
@@ -236,10 +244,9 @@ SVG, PNG, and VCD artifacts are kept separate from the source design.
   guidance.
 - `project_idea.pdf` contains the broader project proposal and research basis.
 
-## Interactive Workbench
+## Interactive Workbenches
 
-The RTL-backed workbench runs as two local processes. Start the backend first,
-then the Vite frontend in a second terminal:
+### Objective 1: Arithmetic & Digital Logic Workbench
 
 ```bash
 cd objective01-digital-logic
@@ -253,7 +260,20 @@ npm --prefix objective01-digital-logic/simulator/frontend install
 npm --prefix objective01-digital-logic/simulator/frontend run dev -- --host 127.0.0.1
 ```
 
-Open `http://127.0.0.1:5173/`. The browser sends operands and opcodes to
-FastAPI; FastAPI forwards them to the persistent `objective1_sim` process.
-Results are never recomputed in the browser.
+Open `http://127.0.0.1:5173/` to explore the digital logic ALU, telemetry accumulator, and reversible computing foundation.
+
+### Objective 2: Processor Observatory & RVSecure Workbench
+
+```bash
+cd objective02-riscv-core
+pip install -r simulator/backend/requirements.txt
+python3 simulator/backend/app.py
+```
+
+```bash
+npm --prefix objective02-riscv-core/simulator/frontend install
+npm --prefix objective02-riscv-core/simulator/frontend run dev
+```
+
+Open `http://127.0.0.1:5174/` to explore the interactive 5-stage CPU datapath, live circuit probe oscilloscope, 17-group Booth-Wallace tree multiplier, 33-cycle iterative divider, 4-channel telemetry waveforms, 2D capability memory map, and precise trap exploit containment engine.
 
