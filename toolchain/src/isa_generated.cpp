@@ -63,7 +63,7 @@ static constexpr std::array<InstructionDescriptor, TOTAL_INSTRUCTION_COUNT> INST
     { Mnemonic::CGETTAG, "cgettag", InstructionFormat::CAP_R, 0x0B, 0x5, 0x00, 0x000, 0x0000500B, 0xFE00707F, true, true, true, false, 31, 7, 31, false, true, false },
     { Mnemonic::CGETPERM, "cgetperm", InstructionFormat::CAP_R, 0x0B, 0x6, 0x00, 0x000, 0x0000600B, 0xFE00707F, true, true, true, false, 31, 7, 31, false, true, false },
     { Mnemonic::CGETOFFSET, "cgetoffset", InstructionFormat::CAP_R, 0x0B, 0x7, 0x00, 0x000, 0x0000700B, 0xFE00707F, true, true, true, false, 31, 7, 31, false, true, false },
-    { Mnemonic::CCLEAR, "cclear", InstructionFormat::CAP_R, 0x0B, 0x7, 0x01, 0x000, 0x0200700B, 0xFE00707F, true, true, true, false, 7, 7, 31, true, true, false },
+    { Mnemonic::CCLEAR, "cclear", InstructionFormat::CAP_R, 0x0B, 0x7, 0x01, 0x000, 0x0200700B, 0xFE00707F, true, true, true, false, 7, 31, 31, true, false, false },
     { Mnemonic::CLB, "clb", InstructionFormat::CAP_MEM_I, 0x2B, 0x0, 0x00, 0x000, 0x0000002B, 0x0000707F, true, true, false, false, 31, 7, 31, false, true, false },
     { Mnemonic::CLH, "clh", InstructionFormat::CAP_MEM_I, 0x2B, 0x1, 0x00, 0x000, 0x0000102B, 0x0000707F, true, true, false, false, 31, 7, 31, false, true, false },
     { Mnemonic::CLW, "clw", InstructionFormat::CAP_MEM_I, 0x2B, 0x2, 0x00, 0x000, 0x0000202B, 0x0000707F, true, true, false, false, 31, 7, 31, false, true, false },
@@ -108,6 +108,15 @@ const InstructionDescriptor* lookup_descriptor_by_encoding(uint32_t word, bool b
         }
     }
     return nullptr;
+}
+
+bool is_known_opcode(uint8_t opcode) noexcept {
+    for (const auto& desc : INSTRUCTION_TABLE) {
+        if (desc.opcode == opcode) {
+            return true;
+        }
+    }
+    return false;
 }
 
 std::string_view get_mnemonic_name(Mnemonic mnemonic) noexcept {

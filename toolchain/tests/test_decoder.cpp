@@ -57,6 +57,14 @@ void test_non_canonical_ignored_fields() {
     assert(dec1.status == DecodeStatus::NON_CANONICAL_IGNORED_FIELDS);
     assert(dec1.mnemonic == Mnemonic::CCLEAR);
 
+    // CCLEAR with rs1=31, rs2=31 (0x03FF718B) should also be legal but NON_CANONICAL
+    uint32_t non_canon_cclear_max = 0x03FF718B;
+    auto dec_max = Decoder::decode(non_canon_cclear_max, MachineProfile::AN32_BARE_V1);
+    assert(dec_max.is_legal());
+    assert(!dec_max.is_canonical());
+    assert(dec_max.status == DecodeStatus::NON_CANONICAL_IGNORED_FIELDS);
+    assert(dec_max.mnemonic == Mnemonic::CCLEAR);
+
     // CGETBASE x10, c3 with non-zero rs2 field (rs2=7)
     // Canonical: 0x0001B50B. Non-canonical with rs2=7: 0x0071B50B
     uint32_t non_canon_cgetbase = 0x0071B50B;
@@ -65,6 +73,35 @@ void test_non_canonical_ignored_fields() {
     assert(!dec2.is_canonical());
     assert(dec2.status == DecodeStatus::NON_CANONICAL_IGNORED_FIELDS);
     assert(dec2.mnemonic == Mnemonic::CGETBASE);
+}
+
+void test_illegal_opcode_vs_illegal_funct() {
+    // Unknown major opcodes -> ILLEGAL_OPCODE
+    auto dec_unk1 = Decoder::decode(0x0000007F, MachineProfile::AN32_BARE_V1);
+    assert(!dec_unk1.is_legal());
+    assert(dec_unk1.status == DecodeStatus::ILLEGAL_OPCODE);
+
+    auto dec_unk2 = Decoder::decode(0x00000000, MachineProfile::AN32_BARE_V1);
+    assert(!dec_unk2.is_legal());
+    assert(dec_unk2.status == DecodeStatus::ILLEGAL_OPCODE);
+
+    // Known opcode (0x33 = OP) with reserved funct7 -> ILLEGAL_FUNCT
+    uint32_t reserved_r_funct7 = 0x3E000033; // funct7=0x1F, funct3=0, opcode=0x33
+    auto dec_funct1 = Decoder::decode(reserved_r_funct7, MachineProfile::AN32_BARE_V1);
+    assert(!dec_funct1.is_legal());
+    assert(dec_funct1.status == DecodeStatus::ILLEGAL_FUNCT);
+
+    // Known opcode (0x63 = BRANCH) with reserved funct3=2 -> ILLEGAL_FUNCT
+    uint32_t reserved_branch_funct3 = 0x00002063;
+    auto dec_funct2 = Decoder::decode(reserved_branch_funct3, MachineProfile::AN32_BARE_V1);
+    assert(!dec_funct2.is_legal());
+    assert(dec_funct2.status == DecodeStatus::ILLEGAL_FUNCT);
+
+    // Known opcode (0x03 = LOAD) with reserved funct3=3 -> ILLEGAL_FUNCT
+    uint32_t reserved_load_funct3 = 0x00003003;
+    auto dec_funct3 = Decoder::decode(reserved_load_funct3, MachineProfile::AN32_BARE_V1);
+    assert(!dec_funct3.is_legal());
+    assert(dec_funct3.status == DecodeStatus::ILLEGAL_FUNCT);
 }
 
 void test_illegal_profile_system_instructions() {
@@ -82,6 +119,7 @@ int main() {
     std::cout << "[RUN] test_decoder\n";
     test_all_bare_instructions_decode();
     test_non_canonical_ignored_fields();
+    test_illegal_opcode_vs_illegal_funct();
     test_illegal_profile_system_instructions();
     std::cout << "[PASS] test_decoder passed successfully!\n";
     return 0;

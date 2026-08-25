@@ -53,7 +53,7 @@ Result<uint32_t> Encoder::encode_shift(Mnemonic m, XReg rd, XReg rs1, ShiftAmoun
                     ((rd.index & 0x1F) << 7) |
                     ((desc.funct3 & 0x7) << 12) |
                     ((rs1.index & 0x1F) << 15) |
-                    ((shamt.shamt & 0x1F) << 20) |
+                    ((shamt.value & 0x1F) << 20) |
                     ((desc.funct7 & 0x7F) << 25);
     return word;
 }

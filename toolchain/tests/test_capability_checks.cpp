@@ -7,7 +7,7 @@ using namespace an32;
 
 void test_capability_register_bounds() {
     // Valid c0..c7
-    for (uint8_t i = 0; i < 8; ++i) {
+    for (uint32_t i = 0; i < 8; ++i) {
         auto enc = Encoder::encode_csetbounds(CapReg(i), CapReg(i), XReg(1));
         assert(enc.is_ok());
         auto dec = Decoder::decode(enc.value());
@@ -17,7 +17,7 @@ void test_capability_register_bounds() {
     }
 
     // Invalid c8..c31 in encoder
-    for (uint8_t i = 8; i < 32; ++i) {
+    for (uint32_t i = 8; i < 32; ++i) {
         assert(Encoder::encode_csetbounds(CapReg(i), CapReg(0), XReg(1)).is_err());
         assert(Encoder::encode_csetbounds(CapReg(0), CapReg(i), XReg(1)).is_err());
         assert(Encoder::encode_cclear(CapReg(i)).is_err());
@@ -37,6 +37,114 @@ void test_capability_register_bounds() {
     auto dec_bad_cs1 = Decoder::decode(raw_bad_cs1);
     assert(!dec_bad_cs1.is_legal());
     assert(dec_bad_cs1.status == DecodeStatus::ILLEGAL_REGISTER);
+}
+
+void test_cclear_ignored_fields() {
+    // CCLEAR: cd in c0..c7, funct3=7, funct7=1, opcode=0x0B
+    // rs1 and rs2 are ignored by hardware and accept 0..31
+    for (uint32_t cd = 0; cd < 8; ++cd) {
+        for (uint32_t rs1 = 0; rs1 < 32; ++rs1) {
+            for (uint32_t rs2 = 0; rs2 < 32; ++rs2) {
+                uint32_t word = 0x0B | (cd << 7) | (7 << 12) | (rs1 << 15) | (rs2 << 20) | (1 << 25);
+                auto dec = Decoder::decode(word);
+                assert(dec.is_legal());
+                assert(dec.mnemonic == Mnemonic::CCLEAR);
+                assert(dec.rd_idx == cd);
+                assert(dec.rs1_idx == rs1);
+                assert(dec.rs2_idx == rs2);
+
+                if (rs1 == 0 && rs2 == 0) {
+                    assert(dec.status == DecodeStatus::CANONICAL);
+                } else {
+                    assert(dec.status == DecodeStatus::NON_CANONICAL_IGNORED_FIELDS);
+                }
+            }
+        }
+    }
+
+    // CCLEAR with invalid cd (c8..c31) must be rejected
+    for (uint32_t cd = 8; cd < 32; ++cd) {
+        uint32_t word = 0x0B | (cd << 7) | (7 << 12) | (0 << 15) | (0 << 20) | (1 << 25);
+        auto dec = Decoder::decode(word);
+        assert(!dec.is_legal());
+        assert(dec.status == DecodeStatus::ILLEGAL_REGISTER);
+    }
+}
+
+void test_typed_wrappers_no_narrowing() {
+    // XReg hardening
+    assert(XReg(0).is_valid());
+    assert(XReg(31).is_valid());
+    assert(!XReg(32).is_valid());
+    assert(!XReg(255).is_valid());
+    assert(!XReg(256).is_valid());
+    assert(!XReg(257).is_valid());
+    assert(!XReg(100000).is_valid());
+    assert(XReg::from_index(31).has_value());
+    assert(!XReg::from_index(32).has_value());
+    assert(!XReg::from_index(256).has_value());
+
+    // CapReg hardening
+    assert(CapReg(0).is_valid());
+    assert(CapReg(7).is_valid());
+    assert(!CapReg(8).is_valid());
+    assert(!CapReg(255).is_valid());
+    assert(!CapReg(256).is_valid());
+    assert(!CapReg(257).is_valid());
+    assert(!CapReg(100000).is_valid());
+    assert(CapReg::from_index(7).has_value());
+    assert(!CapReg::from_index(8).has_value());
+    assert(!CapReg::from_index(256).has_value());
+
+    // ShiftAmount5 hardening
+    assert(ShiftAmount5(0).is_valid());
+    assert(ShiftAmount5(31).is_valid());
+    assert(!ShiftAmount5(32).is_valid());
+    assert(!ShiftAmount5(255).is_valid());
+    assert(!ShiftAmount5(256).is_valid());
+    assert(!ShiftAmount5(257).is_valid());
+    assert(!ShiftAmount5(100000).is_valid());
+    assert(ShiftAmount5::from_value(31).has_value());
+    assert(!ShiftAmount5::from_value(32).has_value());
+    assert(!ShiftAmount5::from_value(256).has_value());
+
+    // Immediate wrappers without 32-bit/64-bit overflow narrowing
+    assert(IImm12(-2048).is_valid());
+    assert(IImm12(2047).is_valid());
+    assert(!IImm12(-2049).is_valid());
+    assert(!IImm12(2048).is_valid());
+    assert(!IImm12(1LL << 33).is_valid());
+    assert(!IImm12(-(1LL << 33)).is_valid());
+
+    assert(SImm12(-2048).is_valid());
+    assert(SImm12(2047).is_valid());
+    assert(!SImm12(-2049).is_valid());
+    assert(!SImm12(2048).is_valid());
+    assert(!SImm12(1LL << 33).is_valid());
+
+    assert(BranchOffset13(-4096).is_valid());
+    assert(BranchOffset13(4094).is_valid());
+    assert(!BranchOffset13(-4098).is_valid());
+    assert(!BranchOffset13(4096).is_valid());
+    assert(!BranchOffset13(3).is_valid()); // Odd
+    assert(!BranchOffset13(1LL << 33).is_valid());
+
+    assert(JumpOffset21(-1048576).is_valid());
+    assert(JumpOffset21(1048574).is_valid());
+    assert(!JumpOffset21(-1048578).is_valid());
+    assert(!JumpOffset21(1048576).is_valid());
+    assert(!JumpOffset21(3).is_valid()); // Odd
+    assert(!JumpOffset21(1LL << 33).is_valid());
+
+    assert(UImm20(0).is_valid());
+    assert(UImm20(0xFFFFF).is_valid());
+    assert(!UImm20(0x100000).is_valid());
+    assert(!UImm20(1ULL << 33).is_valid());
+
+    // Verify encoder rejects overflow operands
+    assert(Encoder::encode_shift(Mnemonic::SLLI, XReg(1), XReg(2), ShiftAmount5(256)).is_err());
+    assert(Encoder::encode_r(Mnemonic::ADD, XReg(256), XReg(1), XReg(2)).is_err());
+    assert(Encoder::encode_csetbounds(CapReg(256), CapReg(0), XReg(1)).is_err());
 }
 
 void test_cap_mem_i_vs_s_distinction() {
@@ -71,6 +179,8 @@ void test_cap_mem_i_vs_s_distinction() {
 int main() {
     std::cout << "[RUN] test_capability_checks\n";
     test_capability_register_bounds();
+    test_cclear_ignored_fields();
+    test_typed_wrappers_no_narrowing();
     test_cap_mem_i_vs_s_distinction();
     std::cout << "[PASS] test_capability_checks passed successfully!\n";
     return 0;

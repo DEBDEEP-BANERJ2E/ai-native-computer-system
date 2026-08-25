@@ -127,6 +127,7 @@ inline constexpr std::string_view SPEC_PROVENANCE = "phase0-freeze-v1.0 (commit 
 const InstructionDescriptor& get_instruction_descriptor(Mnemonic mnemonic) noexcept;
 std::optional<Mnemonic> lookup_mnemonic_by_name(std::string_view name) noexcept;
 const InstructionDescriptor* lookup_descriptor_by_encoding(uint32_t word, bool bare_profile_only = true) noexcept;
+bool is_known_opcode(uint8_t opcode) noexcept;
 std::string_view get_mnemonic_name(Mnemonic mnemonic) noexcept;
 
 // Integer ABI Register Access (x0-x31)

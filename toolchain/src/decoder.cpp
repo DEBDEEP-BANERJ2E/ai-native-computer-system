@@ -59,8 +59,13 @@ DecodedInstruction Decoder::decode(uint32_t word, MachineProfile profile) noexce
             return res;
         }
 
+        uint8_t op = static_cast<uint8_t>(word & 0x7F);
         res.mnemonic = Mnemonic::UNKNOWN_ILLEGAL;
-        res.status = DecodeStatus::ILLEGAL_OPCODE;
+        if (is_known_opcode(op)) {
+            res.status = DecodeStatus::ILLEGAL_FUNCT;
+        } else {
+            res.status = DecodeStatus::ILLEGAL_OPCODE;
+        }
         return res;
     }
 

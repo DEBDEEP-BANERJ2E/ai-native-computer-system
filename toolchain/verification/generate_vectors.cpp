@@ -416,6 +416,29 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // 1b-ii. Exhaustive CCLEAR sweep across all cd (0..31), rs1 (0..31), and rs2 (0..31)
+    // For cd=0..7: all 8*32*32 = 8,192 cases are hardware legal.
+    // For cd=8..31: all 24*32*32 = 24,576 cases are hardware illegal.
+    for (uint32_t cd = 0; cd < 32; ++cd) {
+        for (uint32_t rs1 = 0; rs1 < 32; ++rs1) {
+            for (uint32_t rs2 = 0; rs2 < 32; ++rs2) {
+                uint32_t w = 0x0B | (cd << 7) | (7 << 12) | (rs1 << 15) | (rs2 << 20) | (1 << 25);
+                test_words.push_back(w);
+            }
+        }
+    }
+
+    // 1b-iii. Exhaustive CGET* ignored rs2 field sweep
+    uint32_t cget_f3[] = {3, 4, 5, 6, 7}; // cgetbase, cgetlen, cgettag, cgetperm, cgetoffset
+    for (uint32_t f3 : cget_f3) {
+        for (uint32_t cs1 = 0; cs1 < 32; ++cs1) {
+            for (uint32_t rs2 = 0; rs2 < 32; ++rs2) {
+                uint32_t w = 0x0B | (1 << 7) | (f3 << 12) | (cs1 << 15) | (rs2 << 20) | (0 << 25);
+                test_words.push_back(w);
+            }
+        }
+    }
+
     // 1c. All 128 major opcodes
     for (uint32_t op = 0; op < 128; ++op) {
         test_words.push_back(op | (1 << 7) | (0 << 12) | (2 << 15) | (3 << 20));

@@ -40,14 +40,14 @@ int main(int argc, char* argv[]) {
                 if (argc != 5) { std::cerr << "Usage: " << mnem_str << " <rd> <rs1> <shamt>\n"; return 1; }
                 auto rd = lookup_xreg_by_name(argv[2]);
                 auto rs1 = lookup_xreg_by_name(argv[3]);
-                uint32_t shamt = std::stoul(argv[4], nullptr, 0);
+                uint64_t shamt = std::stoull(argv[4], nullptr, 0);
                 if (!rd || !rs1) { std::cerr << "Error: Invalid integer register\n"; return 1; }
-                res = Encoder::encode_shift(m, XReg(*rd), XReg(*rs1), ShiftAmount5(static_cast<uint8_t>(shamt)));
+                res = Encoder::encode_shift(m, XReg(*rd), XReg(*rs1), ShiftAmount5(static_cast<uint32_t>(shamt)));
             } else {
                 if (argc != 5) { std::cerr << "Usage: " << mnem_str << " <rd> <rs1> <imm>\n"; return 1; }
                 auto rd = lookup_xreg_by_name(argv[2]);
                 auto rs1 = lookup_xreg_by_name(argv[3]);
-                int32_t imm = std::stol(argv[4], nullptr, 0);
+                int64_t imm = std::stoll(argv[4], nullptr, 0);
                 if (!rd || !rs1) { std::cerr << "Error: Invalid integer register\n"; return 1; }
                 res = Encoder::encode_i(m, XReg(*rd), XReg(*rs1), IImm12(imm));
             }
@@ -55,26 +55,26 @@ int main(int argc, char* argv[]) {
             if (argc != 5) { std::cerr << "Usage: " << mnem_str << " <rs2> <rs1> <offset>\n"; return 1; }
             auto rs2 = lookup_xreg_by_name(argv[2]);
             auto rs1 = lookup_xreg_by_name(argv[3]);
-            int32_t off = std::stol(argv[4], nullptr, 0);
+            int64_t off = std::stoll(argv[4], nullptr, 0);
             if (!rs1 || !rs2) { std::cerr << "Error: Invalid integer register\n"; return 1; }
             res = Encoder::encode_s(m, XReg(*rs2), XReg(*rs1), SImm12(off));
         } else if (desc.format == InstructionFormat::B) {
             if (argc != 5) { std::cerr << "Usage: " << mnem_str << " <rs1> <rs2> <offset>\n"; return 1; }
             auto rs1 = lookup_xreg_by_name(argv[2]);
             auto rs2 = lookup_xreg_by_name(argv[3]);
-            int32_t off = std::stol(argv[4], nullptr, 0);
+            int64_t off = std::stoll(argv[4], nullptr, 0);
             if (!rs1 || !rs2) { std::cerr << "Error: Invalid integer register\n"; return 1; }
             res = Encoder::encode_b(m, XReg(*rs1), XReg(*rs2), BranchOffset13(off));
         } else if (desc.format == InstructionFormat::U) {
             if (argc != 4) { std::cerr << "Usage: " << mnem_str << " <rd> <imm20>\n"; return 1; }
             auto rd = lookup_xreg_by_name(argv[2]);
-            uint32_t imm20 = std::stoul(argv[3], nullptr, 0);
+            uint64_t imm20 = std::stoull(argv[3], nullptr, 0);
             if (!rd) { std::cerr << "Error: Invalid integer register\n"; return 1; }
             res = Encoder::encode_u(m, XReg(*rd), UImm20(imm20));
         } else if (desc.format == InstructionFormat::J) {
             if (argc != 4) { std::cerr << "Usage: " << mnem_str << " <rd> <offset>\n"; return 1; }
             auto rd = lookup_xreg_by_name(argv[2]);
-            int32_t off = std::stol(argv[3], nullptr, 0);
+            int64_t off = std::stoll(argv[3], nullptr, 0);
             if (!rd) { std::cerr << "Error: Invalid integer register\n"; return 1; }
             res = Encoder::encode_j(XReg(*rd), JumpOffset21(off));
         } else if (desc.format == InstructionFormat::CAP_R) {

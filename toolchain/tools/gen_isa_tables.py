@@ -139,6 +139,7 @@ def generate_code(isa_data, abi_data, cap_data):
     hpp.append("const InstructionDescriptor& get_instruction_descriptor(Mnemonic mnemonic) noexcept;")
     hpp.append("std::optional<Mnemonic> lookup_mnemonic_by_name(std::string_view name) noexcept;")
     hpp.append("const InstructionDescriptor* lookup_descriptor_by_encoding(uint32_t word, bool bare_profile_only = true) noexcept;")
+    hpp.append("bool is_known_opcode(uint8_t opcode) noexcept;")
     hpp.append("std::string_view get_mnemonic_name(Mnemonic mnemonic) noexcept;\n")
 
     # ABI register functions
@@ -180,8 +181,8 @@ def generate_code(isa_data, abi_data, cap_data):
         has_f7 = "true" if "funct7" in inst else "false"
         has_f12 = "true" if "funct12" in inst else "false"
 
-        # Register constraints
-        fmt_str = inst["format"]
+        # Derive register constraints and roles directly from specification
+        constraints = inst.get("constraints", {})
         uses_rd_cap = "false"
         uses_rs1_cap = "false"
         uses_rs2_cap = "false"
@@ -189,23 +190,39 @@ def generate_code(isa_data, abi_data, cap_data):
         rs1_max = 31
         rs2_max = 31
 
-        if fmt_str == "CAP_R":
-            uses_rs1_cap = "true"
-            rs1_max = 7
-            if name in ["csetbounds", "candperm", "cincoffset", "cclear"]:
-                uses_rd_cap = "true"
-                rd_max = 7
-            else: # CGET*
-                rd_max = 31
-        elif fmt_str in ["CAP_MEM_I", "CAP_MEM_S"]:
-            uses_rs1_cap = "true"
-            rs1_max = 7
+        if "cd" in constraints:
+            uses_rd_cap = "true"
+            rd_max = 7
+        elif "rd" in constraints:
+            rd_str = str(constraints["rd"])
+            rd_max = 0 if rd_str == "0" else 31
+            uses_rd_cap = "false"
 
-        if fmt_str in ["SYSTEM_FIXED", "SYSTEM_R"]:
+        if "cs1" in constraints:
+            cs1_str = str(constraints["cs1"])
+            if cs1_str.startswith("0..7"):
+                uses_rs1_cap = "true"
+                rs1_max = 7
+            else:
+                uses_rs1_cap = "false"
+                rs1_max = 31
+        elif "rs1" in constraints:
+            rs1_str = str(constraints["rs1"])
+            rs1_max = 0 if rs1_str == "0" else 31
+            uses_rs1_cap = "false"
+
+        if "rs2" in constraints:
+            rs2_str = str(constraints["rs2"])
+            rs2_max = 0 if rs2_str == "0" else 31
+            uses_rs2_cap = "false"
+
+        fmt_str = inst["format"]
+        if fmt_str == "SYSTEM_FIXED":
             rd_max = 0
-            if fmt_str == "SYSTEM_FIXED":
-                rs1_max = 0
-                rs2_max = 0
+            rs1_max = 0
+            rs2_max = 0
+        elif fmt_str == "SYSTEM_R":
+            rd_max = 0
 
         cpp.append(f'    {{ {mnem_enum}, "{name}", {fmt}, 0x{opcode:02X}, 0x{funct3:X}, 0x{funct7:02X}, 0x{funct12:03X}, 0x{match_val:08X}, 0x{mask_val:08X}, {is_bare}, {has_f3}, {has_f7}, {has_f12}, {rd_max}, {rs1_max}, {rs2_max}, {uses_rd_cap}, {uses_rs1_cap}, {uses_rs2_cap} }},')
     cpp.append("}};\n")
@@ -243,6 +260,16 @@ def generate_code(isa_data, abi_data, cap_data):
     cpp.append("        }")
     cpp.append("    }")
     cpp.append("    return nullptr;")
+    cpp.append("}\n")
+
+    # is_known_opcode
+    cpp.append("bool is_known_opcode(uint8_t opcode) noexcept {")
+    cpp.append("    for (const auto& desc : INSTRUCTION_TABLE) {")
+    cpp.append("        if (desc.opcode == opcode) {")
+    cpp.append("            return true;")
+    cpp.append("        }")
+    cpp.append("    }")
+    cpp.append("    return false;")
     cpp.append("}\n")
 
     # get_mnemonic_name
