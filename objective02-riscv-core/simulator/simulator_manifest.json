@@ -1,0 +1,19 @@
+{
+  "objective": 2,
+  "title": "Objective 2 Processor Observatory — RVSecure Workbench",
+  "tag": "objective2-freeze-v1.0",
+  "commit": "1ad498b",
+  "branch": "main",
+  "engine_primary": "verilator",
+  "engine_reference": "python_isa_model",
+  "verilator_version": "5.050",
+  "architecture": "RV32IM 5-Stage In-Order Hazard-Forwarding Core",
+  "security": "CapabilityLite / Dedicated Architectural Precise Traps",
+  "telemetry": "Objective 1 Telemetry Bridge (0x80001000) & Cross-Layer System MMIO (0x80002000)",
+  "verification": {
+    "chisel_tests": "108 / 108 passing across 16 suites",
+    "differential_parity": "18 benchmark suites (223 retirement events bit-exact)",
+    "objective1_regression": "24 / 24 passing across 13 suites",
+    "rtl_generated": true
+  }
+}
