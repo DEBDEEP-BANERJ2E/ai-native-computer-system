@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { GitCompare, Cpu, Play, CheckCircle2, AlertTriangle } from "lucide-react";
 import { compareCores } from "../../api";
 import { CoreComparisonData, ScenarioItem } from "../../types";
+import { DualCoreRaceVisualizer } from "./DualCoreRaceVisualizer";
 
 interface LabCompareProps {
   scenarios: ScenarioItem[];
@@ -147,6 +148,9 @@ export const LabCompareCores: React.FC<LabCompareProps> = ({ scenarios }) => {
           </div>
         </div>
       )}
+
+      {/* Dual Core Race Track & Speedometer Visualizer */}
+      <DualCoreRaceVisualizer data={comparison} />
 
       {/* Scope Note */}
       <div className="glass-panel" style={{ background: "rgba(0,0,0,0.3)" }}>

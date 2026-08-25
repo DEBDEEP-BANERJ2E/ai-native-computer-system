@@ -3,6 +3,7 @@ import { Activity, Cpu, Sliders, Play, SkipForward, RotateCcw, ArrowDown } from 
 import { SimulationState } from "../../types";
 import { TelemetryTable } from "../TelemetryTable";
 import { PipelineDiagram } from "../PipelineDiagram";
+import { TelemetryWaveform } from "./TelemetryWaveform";
 
 interface Lab5Props {
   state: SimulationState | null;
@@ -120,6 +121,9 @@ export const Lab5MMIOTelemetry: React.FC<Lab5Props> = ({
           </div>
         </div>
       </div>
+
+      {/* Real-Time Telemetry & EDP Meter */}
+      {state && <TelemetryWaveform mmio={state.mmio} />}
 
       {/* Telemetry & MMIO Table */}
       {state && <TelemetryTable mmio={state.mmio} onWriteMMIO={onWriteMMIO} />}

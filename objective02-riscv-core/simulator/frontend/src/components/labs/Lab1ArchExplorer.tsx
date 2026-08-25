@@ -1,5 +1,7 @@
 import React, { useState } from "react";
-import { Cpu, Shield, Layers, HelpCircle, FileCode, CheckCircle2, ChevronRight, X } from "lucide-react";
+import { Cpu, Shield, Layers, HelpCircle, FileCode, CheckCircle2, ChevronRight, X, Zap } from "lucide-react";
+import { InteractiveDatapath } from "../InteractiveDatapath";
+import { SimulationState } from "../../types";
 
 interface ModuleDetail {
   id: string;
@@ -14,131 +16,160 @@ interface ModuleDetail {
 }
 
 const MODULE_DETAILS: Record<string, ModuleDetail> = {
-  IF: {
-    id: "IF",
-    name: "Instruction Fetch (IF) Stage & PC Unit",
+  PC: {
+    id: "PC",
+    name: "Program Counter & Next-PC Unit",
     stage: "IF",
     phase: "Phase 1 & 2",
     sourceFile: "objective02/datapath/ProgramCounter.scala",
-    role: "Maintains 32-bit architectural Program Counter (PC) and fetches 32-bit instruction words from InstructionMemory ROM. Evaluates stallIF and branch/trap redirects.",
+    role: "Maintains the 32-bit architectural Program Counter (PC). Increments by +4 on sequential fetch, or loads branch/jump targets from EX stage or trap vectors from MEM stage.",
     inputs: ["clock", "reset", "hazardUnit.io.stallIF", "branchJumpUnit.io.targetAddress", "takePreciseTrap", "trapVector"],
-    outputs: ["pc", "nextPc (PC+4)", "instruction (32-bit raw)"],
-    designRationale: "Sequential fetch baseline. If a branch is taken or a precise trap occurs in later stages, PC redirect target is selected combinationally with top priority over normal PC+4 increment."
+    outputs: ["io.pc (32-bit)", "nextPc (PC+4)"],
+    designRationale: "Sequential fetch baseline. Priority mux selects takePreciseTrap > branchTaken > stallIF > PC+4."
   },
-  ID: {
-    id: "ID",
-    name: "Instruction Decode (ID) & Register Files",
+  IMEM: {
+    id: "IMEM",
+    name: "Instruction Memory ROM (VecInit)",
+    stage: "IF",
+    phase: "Phase 1",
+    sourceFile: "objective02/memory/InstructionMemory.scala",
+    role: "Stores the elaboration-time binary program in a high-speed synchronous ROM. Provides 32-bit instruction words to the IF/ID register.",
+    inputs: ["address (from PC)"],
+    outputs: ["instruction (32-bit)"],
+    designRationale: "Bakes frozen verified binary programs at Chisel elaboration time to guarantee zero unintended runtime ROM mutation."
+  },
+  DECODER: {
+    id: "DECODER",
+    name: "Instruction Decoder & Immediate Generator",
     stage: "ID",
     phase: "Phase 1, 2 & 7",
-    sourceFile: "objective02/decode/Decoder.scala, RegisterFile.scala, CapabilityRegFile.scala",
-    role: "Decodes 32-bit RISC-V opcodes, generates immediate values, reads rs1/rs2 from integer RegisterFile (x0-x31), and reads cs1 from CapabilityRegFile (c0-c7). Same-cycle WB->ID bypass avoids NOP stalls on register writes.",
-    inputs: ["instruction", "regWrite/writeData (from WB)", "capWrite/writeCapData (from WB)"],
-    outputs: ["controlSignals", "rs1Data", "rs2Data", "immOut", "capData (101-bit)"],
-    designRationale: "Hardware-immutable roots (c0=NULL, c1=RAM, c2=MMIO) are permanently locked against software writes in CapabilityRegFile. Asynchronous read with synchronous writeback enables 0-cycle forwarding."
+    sourceFile: "objective02/decode/Decoder.scala, ImmediateGenerator.scala",
+    role: "Decodes 32-bit RISC-V opcodes into ALU operations, register write enables, memory access controls, branch conditions, and custom CapabilityLite manipulation flags.",
+    inputs: ["instruction (32-bit)"],
+    outputs: ["aluOp", "regWrite", "memRead", "memWrite", "branch", "capOp", "immOut"],
+    designRationale: "Custom-0 (0x0B) and Custom-1 (0x2B) capability opcodes are decoded alongside canonical RV32IM instructions."
   },
-  EX: {
-    id: "EX",
-    name: "Execute (EX) Stage: ALU, Multiplier & Divider",
+  REGFILE: {
+    id: "REGFILE",
+    name: "Integer Register File (x0–x31) with WB Bypass",
+    stage: "ID",
+    phase: "Phase 1 & 2",
+    sourceFile: "objective02/datapath/RegisterFile.scala",
+    role: "32 x 32-bit dual-read single-write register file. Hardwired x0=0. Features same-cycle WB->ID bypass to resolve same-cycle write/read RAW hazards without pipeline stalls.",
+    inputs: ["rs1Addr", "rs2Addr", "rdAddr (WB)", "writeData (WB)", "regWrite (WB)"],
+    outputs: ["rs1Data", "rs2Data"],
+    designRationale: "WB->ID internal bypass provides immediate zero-cycle data availability to younger dependent instructions in ID."
+  },
+  CAPREGFILE: {
+    id: "CAPREGFILE",
+    name: "Capability Register File (c0–c7) — 101-Bit Bounded Registers",
+    stage: "ID",
+    phase: "Phase 7 & 8",
+    sourceFile: "objective02/capability/CapabilityRegFile.scala",
+    role: "Stores 8 x 101-bit capability registers (tag, base, length, perms, offset). Hardwires immutable roots c0(NULL), c1(RAM), c2(MMIO). Protects process registers c3–c7.",
+    inputs: ["cs1Addr", "cdAddr (WB)", "writeCapData (WB)", "capWrite (WB)"],
+    outputs: ["cs1Data (101-bit)"],
+    designRationale: "Hardware-enforced root immutability permanently protects RAM and MMIO roots from software modification or corruption."
+  },
+  ALU: {
+    id: "ALU",
+    name: "32-Bit Arithmetic Logic Unit (Objective 1 HCLA & ALU)",
     stage: "EX",
-    phase: "Phase 2, 4 & 5",
-    sourceFile: "objective02/execute/ALU.scala, RV32MMultiplier.scala, IterativeDivider.scala",
-    role: "Executes 32-bit arithmetic/logical operations via Objective-1 HCLA & ALU, 34-bit signed/unsigned Radix-4 Booth-Wallace multiplication (68-bit product), and 33-cycle non-restoring iterative division. Evaluates branch conditions.",
-    inputs: ["operandA (forwarded)", "operandB (forwarded)", "aluOp", "mOp", "divKill"],
-    outputs: ["aluResult", "mulResult64", "divResult", "branchTaken", "redirectTarget"],
-    designRationale: "Reuses Objective 1 arithmetic IP (Booth-Wallace tree with 17 Radix-4 groups and 3:2 reduction). Divider features an explicit io.kill port to immediately abort on traps and prevent pipeline deadlocks."
+    phase: "Phase 1 & 2",
+    sourceFile: "objective01-digital-logic/src/main/scala/datapath/ALU.scala",
+    role: "Performs 32-bit arithmetic (ADD, SUB), logical operations (AND, OR, XOR), shifts (SLL, SRL, SRA), and comparisons (SLT, SLTU).",
+    inputs: ["operandA (forwarded)", "operandB (forwarded)", "aluOp"],
+    outputs: ["aluResult (32-bit)", "statusFlags (Zero, Carry, Overflow, Negative)"],
+    designRationale: "Reuses Objective 1 4-bit block Hierarchical Carry-Lookahead Adder (HCLA) for low-latency addition."
   },
-  MEM: {
-    id: "MEM",
-    name: "Memory (MEM) Stage: DataMemory, MMIO & CapabilityChecker",
+  MUL: {
+    id: "MUL",
+    name: "34-Bit Booth-Wallace High-Throughput Multiplier",
+    stage: "EX",
+    phase: "Phase 4",
+    sourceFile: "objective02/execute/RV32MMultiplier.scala",
+    role: "Single-cycle multiplier executing MUL, MULH, MULHSU, MULHU. 17 Radix-4 Booth groups reduce partial products via 3:2 Wallace Tree CSA.",
+    inputs: ["operandA (34-bit sign/zero ext)", "operandB (34-bit sign/zero ext)", "mOp"],
+    outputs: ["mulResult64 (68-bit product, low 64 bits extracted)"],
+    designRationale: "Operands extended to 34 bits to simultaneously handle signed/unsigned combinations in a unified hardware tree."
+  },
+  DIV: {
+    id: "DIV",
+    name: "33-Cycle Iterative Restoring Divider with Trap Kill",
+    stage: "EX",
+    phase: "Phase 5 & 8",
+    sourceFile: "objective02/execute/IterativeDivider.scala",
+    role: "Multi-cycle divider executing DIV, DIVU, REM, REMU over 32 compute cycles + 1 done cycle. Features io.kill abort port to terminate on traps.",
+    inputs: ["dividend", "divisor", "mOp", "divKill (takePreciseTrap || takeTrapReturn)"],
+    outputs: ["quotient", "remainder", "io.busy", "io.done", "io.iteration"],
+    designRationale: "io.kill port prevents pipeline deadlocks when a memory security exception occurs during an active division."
+  },
+  DATAMEM: {
+    id: "DATAMEM",
+    name: "Data Memory (4KB SRAM) with Atomic Suppression",
     stage: "MEM",
-    phase: "Phase 3, 6, 7 & 8",
-    sourceFile: "objective02/system/SystemMMIO.scala, CapabilityChecker.scala",
-    role: "Accesses DataMemory (4KB) and SystemMMIO (0x80000000+). Performs 33-bit widened CapabilityLite Tag, Bounds, and Permission authorization. On violation, fires combinational takePreciseTrap and captures trap metadata.",
-    inputs: ["effectiveAddress", "writeData", "memRead", "memWrite", "activeCap (101-bit)"],
-    outputs: ["readData", "takePreciseTrap", "trapMetadata", "secAuditLog"],
-    designRationale: "MEM is the single convergence point for all memory and capability security decisions. 33-bit widened bounds checking prevents integer overflow bypasses. Traps combinationally flush younger stages in the same cycle."
+    phase: "Phase 3 & 7",
+    sourceFile: "objective02/memory/DataMemory.scala",
+    role: "4096-byte byte-addressable SRAM supporting LB, LH, LW, LBU, LHU, SB, SH, SW. Suppresses writeback when capability check fails.",
+    inputs: ["effectiveAddress", "writeData", "memRead", "memWrite", "byteMask", "allowAccess"],
+    outputs: ["readData (32-bit)"],
+    designRationale: "Memory writes are atomically blocked before clock edge if CapabilityChecker denies access."
   },
-  WB: {
-    id: "WB",
-    name: "Writeback (WB) Stage & Telemetry Retirement",
-    stage: "WB",
-    phase: "Phase 2 & 6",
-    sourceFile: "objective02/pipeline/PipelinedCore.scala",
-    role: "Commits instruction results to GPR (rd) and CapabilityRegFile (cd). Drives top-level architectural commit telemetry (RETIRED_COUNT, LAST_COMMIT_PC) and triggers Objective-1 CLA switching updates.",
-    inputs: ["memWbReg.valid", "memWbReg.pc", "memWbReg.aluResult", "memWbReg.readData"],
-    outputs: ["commit.valid", "commit.rd", "commit.writeData", "commit.pc"],
-    designRationale: "Architectural commit is strictly separated from speculative execution. Faulting instructions are suppressed before entering WB (valid=0), guaranteeing that invalid operations leave zero architectural side effects."
+  CAPCHECKER: {
+    id: "CAPCHECKER",
+    name: "CapabilityChecker (33-Bit Widened Bounds Checking)",
+    stage: "MEM",
+    phase: "Phase 7 & 8",
+    sourceFile: "objective02/capability/CapabilityChecker.scala",
+    role: "Verifies Tag, Bounds, and Permissions on protected CL*/CS* accesses using 33-bit widened arithmetic. Combinationally produces takePreciseTrap on violations.",
+    inputs: ["activeCap (101-bit)", "imm", "accessLen", "isWrite"],
+    outputs: ["io.allow", "securityEvent.valid", "securityEvent.reason", "securityEvent.accessType"],
+    designRationale: "33-bit widened arithmetic prevents integer overflow wrapping attacks from bypassing bounds checks."
+  },
+  SYSTEM_MMIO: {
+    id: "SYSTEM_MMIO",
+    name: "System MMIO, Telemetry & Precise Trap Subsystem",
+    stage: "MEM",
+    phase: "Phase 6 & 8",
+    sourceFile: "objective02/system/SystemMMIO.scala",
+    role: "Memory-mapped register bank (0x80000000+) housing performance counters, Objective 1 telemetry, OS context registers (SCHED_HINT), and dedicated precise trap registers (TRAP_*).",
+    inputs: ["address", "writeData", "isWrite", "nestedFault", "takeTrapReturn"],
+    outputs: ["readData", "TRAP_ACTIVE", "TRAP_EPC", "TRAP_CAUSE", "TRAP_ADDR", "DOUBLE_FAULT"],
+    designRationale: "Double-fault latch uses set-over-W1C priority to guarantee no nested security fault is ever lost."
   }
 };
 
-export const Lab1ArchExplorer: React.FC = () => {
-  const [selectedModule, setSelectedModule] = useState<ModuleDetail | null>(MODULE_DETAILS["EX"]);
+interface Lab1Props {
+  state?: SimulationState | null;
+}
+
+export const Lab1ArchExplorer: React.FC<Lab1Props> = ({ state }) => {
+  const [selectedModule, setSelectedModule] = useState<ModuleDetail>(MODULE_DETAILS["EX"] || MODULE_DETAILS["ALU"]);
+
+  const handleSelectModuleFromDatapath = (moduleId: string) => {
+    if (MODULE_DETAILS[moduleId]) {
+      setSelectedModule(MODULE_DETAILS[moduleId]);
+    }
+  };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
       {/* Intro Banner */}
       <div className="glass-panel">
-        <h2 style={{ fontSize: "18px", fontWeight: 700, marginBottom: "8px", color: "var(--accent-cyan)" }}>
-          Lab 1: Processor Architecture Explorer & Theory of Operation
+        <h2 style={{ fontSize: "18px", fontWeight: 700, marginBottom: "8px", color: "var(--accent-cyan)", display: "flex", alignItems: "center", gap: "8px" }}>
+          <Layers size={20} />
+          Lab 1: Full Processor Datapath Architecture Explorer & Circuit Probe
         </h2>
         <p style={{ color: "var(--text-secondary)", fontSize: "13px", lineHeight: "1.6" }}>
-          Explore the internal architecture of the frozen <strong>Objective 2 RV32IM Pipelined Processor</strong>.
-          Click any pipeline stage or datapath component below to inspect its Scala/Chisel source location,
-          formal hardware boundary, and architectural design rationale.
+          Explore the complete 5-stage architectural datapath of the frozen <strong>Objective 2 RV32IM Pipelined Processor</strong>.
+          Click any component on the visual schematic below to probe its internal signals, ports, and design rationale.
         </p>
       </div>
 
-      {/* Interactive 5-Stage Block Diagram */}
-      <div className="glass-panel">
-        <div className="panel-header">
-          <span className="panel-title">
-            <Layers size={16} color="var(--accent-cyan)" />
-            Interactive 5-Stage Datapath Architecture
-          </span>
-          <span style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-            CLICK A STAGE TO INSPECT
-          </span>
-        </div>
+      {/* Interactive SVG Datapath Schematic */}
+      {state && <InteractiveDatapath state={state} onSelectModule={handleSelectModuleFromDatapath} />}
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "16px", margin: "16px 0" }}>
-          {Object.values(MODULE_DETAILS).map((mod) => {
-            const isSelected = selectedModule?.id === mod.id;
-            return (
-              <div
-                key={mod.id}
-                onClick={() => setSelectedModule(mod)}
-                style={{
-                  background: isSelected ? "rgba(0, 245, 212, 0.12)" : "rgba(15, 23, 42, 0.6)",
-                  border: `2px solid ${isSelected ? "var(--accent-cyan)" : "var(--border-subtle)"}`,
-                  borderRadius: "12px",
-                  padding: "16px",
-                  cursor: "pointer",
-                  transition: "all 0.2s ease",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "10px",
-                  boxShadow: isSelected ? "var(--shadow-glow)" : "none",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontWeight: 800, fontSize: "16px", fontFamily: "var(--font-mono)", color: isSelected ? "var(--accent-cyan)" : "#fff" }}>
-                    {mod.stage}
-                  </span>
-                  <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>{mod.phase}</span>
-                </div>
-                <div style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: 500 }}>
-                  {mod.name.split(":")[0]}
-                </div>
-                <div style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginTop: "auto" }}>
-                  {mod.sourceFile.split("/").pop()}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Selected Module Detail Modal / Drawer */}
+      {/* Module Inspector Drawer */}
       {selectedModule && (
         <div className="glass-panel" style={{ borderLeft: "4px solid var(--accent-cyan)" }}>
           <div className="panel-header">
@@ -150,16 +181,9 @@ export const Lab1ArchExplorer: React.FC = () => {
                 Source: {selectedModule.sourceFile} ({selectedModule.phase})
               </div>
             </div>
-            <button
-              className="btn btn-secondary"
-              style={{ padding: "4px 8px" }}
-              onClick={() => setSelectedModule(null)}
-            >
-              <X size={14} />
-            </button>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginTop: "16px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "20px", marginTop: "12px" }}>
             <div>
               <h4 style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-primary)", marginBottom: "6px" }}>
                 Primary Function & Microarchitecture

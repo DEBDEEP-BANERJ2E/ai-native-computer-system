@@ -191,7 +191,7 @@ export const App: React.FC = () => {
 
       {/* Main Lab View */}
       <main className="main-content">
-        {activeTab === "lab1" && <Lab1ArchExplorer />}
+        {activeTab === "lab1" && <Lab1ArchExplorer state={state} />}
 
         {activeTab === "lab2" && (
           <Lab2LiveExecution

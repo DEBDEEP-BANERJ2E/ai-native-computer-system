@@ -2,6 +2,7 @@ import React from "react";
 import { AlertTriangle, FastForward, GitCommit, Play, SkipForward, RotateCcw } from "lucide-react";
 import { SimulationState } from "../../types";
 import { PipelineDiagram } from "../PipelineDiagram";
+import { InteractiveDatapath } from "../InteractiveDatapath";
 import { RegisterFileView } from "../RegisterFileView";
 
 interface Lab3Props {
@@ -84,6 +85,9 @@ export const Lab3HazardVisualizer: React.FC<Lab3Props> = ({
 
       {/* Live Pipeline Visualizer */}
       <PipelineDiagram state={state} />
+
+      {/* Interactive Datapath Visualizer with Glowing Bypass Wires */}
+      <InteractiveDatapath state={state} />
 
       {/* Forwarding & Hazard Unit Theory Card */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>

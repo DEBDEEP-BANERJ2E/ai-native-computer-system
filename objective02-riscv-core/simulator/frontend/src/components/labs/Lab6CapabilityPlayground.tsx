@@ -4,6 +4,7 @@ import { SimulationState } from "../../types";
 import { CapabilityRegisterView } from "../CapabilityRegisterView";
 import { PipelineDiagram } from "../PipelineDiagram";
 import { RegisterFileView } from "../RegisterFileView";
+import { MemoryMapVisualizer } from "./MemoryMapVisualizer";
 
 interface Lab6Props {
   state: SimulationState | null;
@@ -115,6 +116,9 @@ export const Lab6CapabilityPlayground: React.FC<Lab6Props> = ({
           </div>
         </div>
       </div>
+
+      {/* 2D Spatial Memory Map & Capability Inspector */}
+      {state && <MemoryMapVisualizer capabilities={state.capabilities} />}
 
       {/* Capability Registers Grid */}
       {state && <CapabilityRegisterView capabilities={state.capabilities} />}

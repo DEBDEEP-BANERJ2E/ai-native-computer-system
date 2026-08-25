@@ -3,6 +3,7 @@ import { Play, SkipForward, RotateCcw, Code, Cpu, Layers } from "lucide-react";
 import { SimulationState, ScenarioItem } from "../../types";
 import { RegisterFileView } from "../RegisterFileView";
 import { PipelineDiagram } from "../PipelineDiagram";
+import { InteractiveDatapath } from "../InteractiveDatapath";
 
 interface Lab2Props {
   state: SimulationState | null;
@@ -72,6 +73,9 @@ export const Lab2LiveExecution: React.FC<Lab2Props> = ({
 
       {/* 5-Stage Live Pipeline */}
       <PipelineDiagram state={state} />
+
+      {/* Interactive Datapath Visualizer */}
+      <InteractiveDatapath state={state} />
 
       {/* Main Split: Code Editor vs Register File */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr", gap: "20px" }}>

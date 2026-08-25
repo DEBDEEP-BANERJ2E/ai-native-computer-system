@@ -4,6 +4,7 @@ import { SimulationState } from "../../types";
 import { PipelineDiagram } from "../PipelineDiagram";
 import { TrapInspector } from "../TrapInspector";
 import { CapabilityRegisterView } from "../CapabilityRegisterView";
+import { AttackAnimationCanvas } from "./AttackAnimationCanvas";
 
 interface Lab7Props {
   state: SimulationState | null;
@@ -101,6 +102,9 @@ export const Lab7AttackTrapDemo: React.FC<Lab7Props> = ({
 
       {/* Pipeline Visualizer */}
       <PipelineDiagram state={state} />
+
+      {/* Real-Time Attack & Trap Defense Visualizer */}
+      <AttackAnimationCanvas state={state} />
 
       {/* Trap & Security Inspector */}
       {state && <TrapInspector mmio={state.mmio} signals={state.signals} />}

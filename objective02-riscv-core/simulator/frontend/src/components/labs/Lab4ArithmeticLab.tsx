@@ -3,6 +3,8 @@ import { Cpu, Activity, Play, SkipForward, RotateCcw, ShieldCheck } from "lucide
 import { SimulationState } from "../../types";
 import { PipelineDiagram } from "../PipelineDiagram";
 import { RegisterFileView } from "../RegisterFileView";
+import { BoothWallaceVisualizer } from "./BoothWallaceVisualizer";
+import { IterativeDividerVisualizer } from "./IterativeDividerVisualizer";
 
 interface Lab4Props {
   state: SimulationState | null;
@@ -160,6 +162,12 @@ export const Lab4ArithmeticLab: React.FC<Lab4Props> = ({
           </div>
         </div>
       </div>
+
+      {/* Interactive 34-Bit Booth-Wallace Multiplier (17 Radix-4 Groups) */}
+      <BoothWallaceVisualizer />
+
+      {/* Interactive 33-Cycle Iterative Divider State Machine */}
+      <IterativeDividerVisualizer />
 
       {/* GPR View */}
       {state && <RegisterFileView registers={state.gpr} />}
