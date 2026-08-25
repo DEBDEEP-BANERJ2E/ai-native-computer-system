@@ -34,8 +34,8 @@ Because there are exactly five writable capability registers (`c3`–`c7`), stri
 | `c0` | `cnull` | **Immutable** | None | Hardwired NULL capability (`tag = 0`). Writes discarded. |
 | `c1` | `cram` | **Immutable** | None | Root Data Memory Authority (`0x00000000..0x00001000`, RW). Writes discarded. |
 | `c2` | `cmmio` | **Immutable** | None | Root MMIO Interconnect Authority (`0x80000000..0x80010000`, RW). Writes discarded. |
-| `c3` | `ca0` | Writable | **Caller** | Capability Argument 0 / Primary Return Capability / Active Process Data Authority. |
-| `c4` | `ca1` | Writable | **Caller** | Capability Argument 1 / Secondary Return Capability / Active Process Heap Authority. |
+| `c3` | `ca0` | Writable | **Caller** | Capability Argument 0 / Primary Return Capability / Active Process Data Region. |
+| `c4` | `ca1` | Writable | **Caller** | Capability Argument 1 / Secondary Return Capability / Active Process Heap Region. |
 | `c5` | `ct0` | Writable | **Caller** | Capability Temporary 0 / Stack Scratch Buffer Authority. |
 | `c6` | `cs0` | Writable | **Callee** | Capability Callee-Saved Register 0. Preserved across function calls. |
 | `c7` | `cs1` | Writable | **Callee** | Capability Callee-Saved Register 1. Preserved across function calls. |
@@ -75,20 +75,30 @@ typedef struct {
 $$\text{Total Capability Context per PCB} = 5 \times 16\text{ bytes} = 80\text{ bytes}$$
 
 ### 4.2 Hardware Re-Derivation Restoration Protocol
-When context switching to a task:
-1. **Valid Capability (`pcb.tag == 1`)**:
-   The OS kernel inspects `root_selector` and derives the target register from the trusted immutable root:
+
+Because frozen `CSETBOUNDS` sets `new.base = old.base + old.offset` (and resets `new.offset = 0`), restoring a capability with an arbitrary base $B$ from root base $R$ requires adjusting the offset before bounding:
+
+1. **Widened Containment Pre-Verification**:
+   $$\text{pcb.base} \ge \text{root.base}$$
+   $$(\text{uint64\_t})\text{pcb.base} + \text{pcb.length} \le (\text{uint64\_t})\text{root.base} + \text{root.length}$$
+   $$\text{pcb.offset} \le \text{pcb.length}$$
+   $$(\text{pcb.perms} \mathbin{\&} \sim\text{root.perms}) == 0$$
+
+2. **Valid Capability Hardware Derivation Sequence (`pcb.tag == 1`)**:
    ```assembly
-   # Example restoring process data capability c3 from c1 (RAM_ROOT)
-   csetbounds c3, c1, a2    # a2 = pcb.length
-   candperm   c3, c3, a3    # a3 = pcb.perms
-   cincoffset c3, c3, a0    # a0 = pcb.offset
+   # Let a1 = pcb.base, a2 = pcb.length, a3 = pcb.perms, a4 = pcb.offset
+   # Let c1 be the selected RAM root (base R, offset 0)
+   sub        t0, a1, zero          # delta_base = pcb.base - root.base (assuming root.base=0)
+   cincoffset c3, c1, t0            # c3.base = R, c3.offset = delta_base
+   csetbounds c3, c3, a2            # c3.base = R + delta_base = pcb.base, c3.length = pcb.length, c3.offset = 0
+   candperm   c3, c3, a3            # c3.perms = c3.perms & pcb.perms
+   cincoffset c3, c3, a4            # c3.offset = pcb.offset
    ```
    Hardware automatically verifies monotonic containment against `c1`/`c2` and sets `tag := 1`.
-2. **Invalid / NULL Capability (`pcb.tag == 0`)**:
-   The OS kernel clears the register using the hardware clear instruction:
+
+3. **Invalid / NULL Capability (`pcb.tag == 0`)**:
    ```assembly
-   cclear     c3            # Sets c3 tag := 0, base := 0, length := 0, perms := 0
+   cclear     c3                    # Sets c3 tag := 0, base := 0, length := 0, perms := 0
    ```
 
 This guarantees that a compromised process modifying its own memory cannot forge authority beyond what is rooted in `c1` or `c2`.

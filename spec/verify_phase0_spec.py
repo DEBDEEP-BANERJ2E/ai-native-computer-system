@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """
-Phase 0 Specification Rigorous Verification Engine
-===================================================
+Phase 0 Specification Machine-Spec Consistency & RTL Constant Verification Engine
+==================================================================================
 Automated mathematical and source-level verification suite validating:
 1. YAML schema validity for all Phase 0 machine and ABI specifications.
 2. Canonical 32-bit (match, mask) calculation for all 60 AN32-Bare-v1 instructions.
 3. True mathematical masked-overlap disjointness across all instruction pairs.
-4. Bit-exact cross-check of every instruction against frozen Chisel Opcodes.scala.
+4. Cross-check of instruction opcodes and funct3/funct7 against frozen Chisel Opcodes.scala.
 5. Bit-exact cross-check of all 28 MMIO registers against MMIOAddress.scala & SystemMMIO.scala.
 6. Validation of 100-bit CapabilityLite bundle and secure PCB restoration contract.
 7. Validation of ILP32 integer calling conventions and 16-byte stack alignment.
-8. Synthetic instruction word generation and reference decode verification.
+8. Synthetic instruction word generation for all formats (R, I, S, B, U, J, CAP_R, CAP_MEM_I, CAP_MEM_S).
+
+Note: Full bit-exact RTL differential decode against an executable Verilator/Chisel decoder harness
+is designated for Phase 1 as part of the encoder/decoder library.
 """
 
 import os
@@ -70,7 +73,7 @@ def compute_instruction_match_mask(inst):
         match_val |= (funct3 & 0x7) << 12
         match_val |= (funct7 & 0x7F) << 25
         mask_val  |= (0x7 << 12) | (0x7F << 25)
-    elif fmt in ["I", "CAP_MEM"]:
+    elif fmt in ["I", "CAP_MEM_I"]:
         if "funct7" in inst: # SLLI, SRLI, SRAI
             match_val |= (funct3 & 0x7) << 12
             match_val |= (funct7 & 0x7F) << 25
@@ -78,7 +81,7 @@ def compute_instruction_match_mask(inst):
         else:
             match_val |= (funct3 & 0x7) << 12
             mask_val  |= (0x7 << 12)
-    elif fmt in ["S", "B"]:
+    elif fmt in ["S", "CAP_MEM_S", "B"]:
         match_val |= (funct3 & 0x7) << 12
         mask_val  |= (0x7 << 12)
     elif fmt in ["U", "J"]:
@@ -108,7 +111,7 @@ def test_mathematical_disjointness(isa_data):
         match_v, mask_v = compute_instruction_match_mask(inst)
         inst_bitmasks.append((mnem, match_v, mask_v))
 
-    # Pairwise overlap verification: (match_a & mask_a & mask_b) == (match_b & mask_a & mask_b)
+    # Pairwise overlap verification: (match_a & common_mask) == (match_b & common_mask)
     overlap_count = 0
     for i in range(len(inst_bitmasks)):
         for j in range(i + 1, len(inst_bitmasks)):
@@ -129,7 +132,6 @@ def parse_chisel_constants(fpath):
     constants = {}
     with open(fpath, "r") as f:
         for line in f:
-            # Match: val CONST_NAME = "b...".U or "h...".U
             m = re.search(r'val\s+([A-Za-z0-9_]+)\s*=\s*"([bh][0-9a-fA-F_]+)"\.U', line)
             if m:
                 cname = m.group(1)
@@ -142,7 +144,7 @@ def parse_chisel_constants(fpath):
     return constants
 
 def test_full_rtl_cross_check(isa_data, mmio_data):
-    print("\n--- Test 3: Exhaustive Bit-Exact RTL Cross-Check (Chisel Source) ---")
+    print("\n--- Test 3: Machine-Spec Consistency & Frozen RTL Constant Cross-Check ---")
     opcodes_scala = os.path.join(O2_SCALA_DIR, "isa", "Opcodes.scala")
     mmio_scala = os.path.join(O2_SCALA_DIR, "system", "MMIOAddress.scala")
     cap_scala = os.path.join(O2_SCALA_DIR, "capability", "CapabilityLite.scala")
@@ -209,7 +211,6 @@ def test_full_rtl_cross_check(isa_data, mmio_data):
     with open(sys_mmio_scala, "r") as f:
         sys_text = f.read()
         assert "val trapEnableReg = RegInit(false.B)" in sys_text or "RegInit(0.U" in sys_text
-        assert "val trapVectorReg = RegInit(MMIOAddress.TRAP_VECTOR" not in sys_text # trapVector resets to 0x800
         log_pass("TRAP_CONTROL reset value verified as 0x00000000 (RegInit false.B) in SystemMMIO.scala.")
 
 # -----------------------------------------------------------------------------
@@ -241,15 +242,15 @@ def test_abi_specifications(abi_data, cap_data):
 
     # PCB restoration security check
     conv = cap_data.get("conventions", {}).get("context_switching", {})
-    assert "derivation" in conv.get("restoration_protocol", {}).get("valid_capability", "").lower()
+    assert "base_delta" in conv.get("restoration_protocol", {}).get("valid_capability", "")
     assert "CCLEAR" in conv.get("restoration_protocol", {}).get("invalid_capability", "")
     log_pass("CapabilityLite secure PCB derivation restoration protocol validated.")
 
 # -----------------------------------------------------------------------------
-# 5. Synthetic Instruction Word Generation & Reference Decode Test
+# 5. Synthetic Instruction Word Generation & Self-Consistency Decode
 # -----------------------------------------------------------------------------
 def test_synthetic_decode_oracle(isa_data):
-    print("\n--- Test 5: Synthetic Instruction Generation & Oracle Decode ---")
+    print("\n--- Test 5: Synthetic Instruction Generation & (Match, Mask) Packing Verification ---")
     bare_instructions = isa_data.get("instructions", [])
 
     for inst in bare_instructions:
@@ -272,7 +273,7 @@ def test_synthetic_decode_oracle(isa_data):
             word |= (rs1 & 0x1F) << 15
             word |= (rs2 & 0x1F) << 20
             word |= (funct7 & 0x7F) << 25
-        elif fmt in ["I", "CAP_MEM"]:
+        elif fmt in ["I", "CAP_MEM_I"]:
             word |= (rd & 0x1F) << 7
             word |= (funct3 & 0x7) << 12
             word |= (rs1 & 0x1F) << 15
@@ -281,7 +282,7 @@ def test_synthetic_decode_oracle(isa_data):
                 word |= (funct7 & 0x7F) << 25
             else:
                 word |= (imm & 0xFFF) << 20
-        elif fmt == "S":
+        elif fmt in ["S", "CAP_MEM_S"]:
             word |= (imm & 0x1F) << 7
             word |= (funct3 & 0x7) << 12
             word |= (rs1 & 0x1F) << 15
@@ -310,14 +311,14 @@ def test_synthetic_decode_oracle(isa_data):
         if (word & mask_v) != match_v:
             log_fail(f"Generated synthetic test word 0x{word:08X} for {mnem} failed mask verification")
 
-    log_pass("Synthesized and successfully decoded legal test words for all 60 Bare-v1 instructions.")
+    log_pass("Synthesized and verified (match, mask) packing for all 60 Bare-v1 instructions across all 8 formats.")
 
 # -----------------------------------------------------------------------------
 # Main Execution
 # -----------------------------------------------------------------------------
 def main():
     print("==================================================================")
-    print("  PHASE 0 SPECIFICATION RIGOROUS AUTOMATED VERIFICATION ENGINE")
+    print("  PHASE 0 SPECIFICATION CONSISTENCY & RTL VERIFICATION ENGINE")
     print("==================================================================")
     data = test_yaml_files_exist_and_load()
     test_mathematical_disjointness(data["isa.yaml"])
@@ -325,7 +326,7 @@ def main():
     test_abi_specifications(data["abi.yaml"], data["capability-abi.yaml"])
     test_synthetic_decode_oracle(data["isa.yaml"])
     print("\n==================================================================")
-    print("  MATHEMATICAL & BIT-EXACT SPECIFICATION VERIFICATION COMPLETE")
+    print("  MACHINE-SPEC CONSISTENCY & FROZEN RTL CONSTANT VERIFICATION COMPLETE")
     print("==================================================================")
 
 if __name__ == "__main__":

@@ -69,14 +69,18 @@ The AN32-System-v1 architecture implements the canonical **Sv32** page-based vir
 
 ### 3.2 Access & Dirty (A/D) Bit Management Policy
 - **Hardware-Managed A/D Updates**: The AN32-System-v1 hardware page-table walker automatically sets `A := 1` in memory on any successful read/write/fetch, and sets `D := 1` on any successful write access.
-- If memory write protection prevents atomic hardware update, the walker raises an appropriate Page Fault (`scause = 13` Load Page Fault or `15` Store Page Fault) for OS resolution.
+- If the hardware walker cannot perform the memory update (e.g. memory write error or software-managed configuration), it raises the page fault corresponding directly to the original access type:
+  - **12** (Instruction Page Fault) if originating from an instruction fetch.
+  - **13** (Load Page Fault) if originating from a data read.
+  - **15** (Store / AMO Page Fault) if originating from a data write.
 
 ### 3.3 Privilege & Memory Protection Policies (SUM and MXR)
 - **`sstatus.SUM` (permit Supervisor User Memory access)**:
-  - When `sstatus.SUM == 0`, S-mode loads and stores to pages with `PTE.U == 1` raise a Page Fault. This prevents kernel privilege-escalation bugs.
-  - When `sstatus.SUM == 1`, S-mode is permitted to read/write user pages.
+  - When `sstatus.SUM == 0`, S-mode loads and stores to pages with `PTE.U == 1` raise a Page Fault.
+  - When `sstatus.SUM == 1`, S-mode is permitted to perform data loads and stores to user pages (`PTE.U == 1`).
+  - **Critical Invariant**: `sstatus.SUM` **never** permits S-mode instruction fetch/execution from U pages. Supervisor execution from a `U=1` page is strictly forbidden under all circumstances to prevent kernel exploit execution.
 - **`sstatus.MXR` (Make Executable Readable)**:
-  - When `sstatus.MXR == 0`, loads to pages with `PTE.X == 1, PTE.R == 0` raise a Load Page Fault.
+  - When `sstatus.MXR == 0`, loads to pages with `PTE.X == 1, PTE.R == 0` raise a Load Page Fault (13).
   - When `sstatus.MXR == 1`, loads to executable pages succeed even if `PTE.R == 0`.
 
 ---

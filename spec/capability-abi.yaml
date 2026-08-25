@@ -103,12 +103,19 @@ conventions:
       offset_0x0F: "uint8_t  reserved_padding"
     restoration_protocol:
       valid_capability: >
-        If PCB tag == 1, the OS kernel restores authority by selecting the trusted
-        immutable root (c1 or c2) and executing hardware derivation:
-        1. CSETBOUNDS cd, c_root, pcb.length
-        2. CANDPERM   cd, cd,     pcb.perms
-        3. CINCOFFSET cd, cd,     pcb.offset
-        Hardware verifies monotonic containment and sets tag := 1.
+        Because frozen CSETBOUNDS sets new.base = old.base + old.offset, the OS kernel
+        restores a valid capability (tag == 1) through the following 4-step sequence:
+        1. base_delta = pcb.base - selected_root.base
+        2. CINCOFFSET cd, c_root, base_delta   # sets cd.base=root.base, cd.offset=base_delta
+        3. CSETBOUNDS cd, cd,     pcb.length   # sets cd.base=pcb.base, cd.length=pcb.length, cd.offset=0
+        4. CANDPERM   cd, cd,     pcb.perms    # restricts permissions
+        5. CINCOFFSET cd, cd,     pcb.offset   # restores final cursor offset
+        Hardware automatically verifies monotonic containment and sets tag := 1.
+      containment_verification_rules:
+        rule_1: "pcb.base >= selected_root.base"
+        rule_2: "(uint64_t)pcb.base + pcb.length <= (uint64_t)selected_root.base + selected_root.length"
+        rule_3: "pcb.offset <= pcb.length"
+        rule_4: "(pcb.perms & ~selected_root.perms) == 0"
       invalid_capability: >
-        If PCB tag == 0, the OS executes CCLEAR cd to set tag := 0.
+        If PCB tag == 0, the OS executes CCLEAR cd to set tag := 0, base := 0, length := 0, perms := 0.
     total_cap_context_bytes: 80 # 5 process registers (c3–c7) * 16 bytes

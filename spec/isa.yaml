@@ -2,6 +2,7 @@
 # Derived directly from frozen Chisel implementation:
 # - objective02/isa/Opcodes.scala
 # - objective02/decode/Decoder.scala
+# - objective02/decode/ImmediateGenerator.scala
 # - objective02/capability/CapabilityLite.scala
 # - objective02/execute/RV32MMultiplier.scala
 # - objective02/execute/IterativeDivider.scala
@@ -10,7 +11,7 @@
 #   - 37 RV32I Base Instructions
 #   - 8 RV32M Extension Instructions
 #   - 9 CapabilityLite Custom-0 Manipulation Instructions
-#   - 6 CapabilityLite Custom-1 Memory Instructions
+#   - 6 CapabilityLite Custom-1 Memory Instructions (3 CAP_MEM_I Loads, 3 CAP_MEM_S Stores)
 #
 # Future AN32-System-v1 privileged instructions are defined in a separate section below.
 
@@ -27,6 +28,7 @@ instructions:
     funct3: "0x0"
     funct7: "0x00"
     operands: "rd, rs1, rs2"
+    constraints: { rd: "0..31", rs1: "0..31", rs2: "0..31" }
     description: "Integer Addition: rd = rs1 + rs2"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -37,6 +39,7 @@ instructions:
     funct3: "0x0"
     funct7: "0x20"
     operands: "rd, rs1, rs2"
+    constraints: { rd: "0..31", rs1: "0..31", rs2: "0..31" }
     description: "Integer Subtraction: rd = rs1 - rs2"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -47,6 +50,7 @@ instructions:
     funct3: "0x1"
     funct7: "0x00"
     operands: "rd, rs1, rs2"
+    constraints: { rd: "0..31", rs1: "0..31", rs2: "0..31" }
     description: "Shift Left Logical: rd = rs1 << rs2[4:0]"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -57,6 +61,7 @@ instructions:
     funct3: "0x2"
     funct7: "0x00"
     operands: "rd, rs1, rs2"
+    constraints: { rd: "0..31", rs1: "0..31", rs2: "0..31" }
     description: "Set Less Than (signed): rd = (rs1 < rs2) ? 1 : 0"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -67,6 +72,7 @@ instructions:
     funct3: "0x3"
     funct7: "0x00"
     operands: "rd, rs1, rs2"
+    constraints: { rd: "0..31", rs1: "0..31", rs2: "0..31" }
     description: "Set Less Than Unsigned: rd = (unsigned(rs1) < unsigned(rs2)) ? 1 : 0"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -77,6 +83,7 @@ instructions:
     funct3: "0x4"
     funct7: "0x00"
     operands: "rd, rs1, rs2"
+    constraints: { rd: "0..31", rs1: "0..31", rs2: "0..31" }
     description: "Bitwise XOR: rd = rs1 ^ rs2"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -87,6 +94,7 @@ instructions:
     funct3: "0x5"
     funct7: "0x00"
     operands: "rd, rs1, rs2"
+    constraints: { rd: "0..31", rs1: "0..31", rs2: "0..31" }
     description: "Shift Right Logical: rd = rs1 >> rs2[4:0] (zero-fill)"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -97,6 +105,7 @@ instructions:
     funct3: "0x5"
     funct7: "0x20"
     operands: "rd, rs1, rs2"
+    constraints: { rd: "0..31", rs1: "0..31", rs2: "0..31" }
     description: "Shift Right Arithmetic: rd = rs1 >>> rs2[4:0] (sign-fill)"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -107,6 +116,7 @@ instructions:
     funct3: "0x6"
     funct7: "0x00"
     operands: "rd, rs1, rs2"
+    constraints: { rd: "0..31", rs1: "0..31", rs2: "0..31" }
     description: "Bitwise OR: rd = rs1 | rs2"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -117,6 +127,7 @@ instructions:
     funct3: "0x7"
     funct7: "0x00"
     operands: "rd, rs1, rs2"
+    constraints: { rd: "0..31", rs1: "0..31", rs2: "0..31" }
     description: "Bitwise AND: rd = rs1 & rs2"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -129,6 +140,7 @@ instructions:
     opcode: "0x13"
     funct3: "0x0"
     operands: "rd, rs1, imm"
+    constraints: { rd: "0..31", rs1: "0..31", imm: "-2048..2047" }
     description: "Add Immediate: rd = rs1 + sign_extend(imm[11:0])"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -138,6 +150,7 @@ instructions:
     opcode: "0x13"
     funct3: "0x2"
     operands: "rd, rs1, imm"
+    constraints: { rd: "0..31", rs1: "0..31", imm: "-2048..2047" }
     description: "Set Less Than Immediate (signed): rd = (rs1 < sign_extend(imm)) ? 1 : 0"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -147,6 +160,7 @@ instructions:
     opcode: "0x13"
     funct3: "0x3"
     operands: "rd, rs1, imm"
+    constraints: { rd: "0..31", rs1: "0..31", imm: "-2048..2047" }
     description: "Set Less Than Immediate Unsigned: rd = (unsigned(rs1) < unsigned(imm)) ? 1 : 0"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -156,6 +170,7 @@ instructions:
     opcode: "0x13"
     funct3: "0x4"
     operands: "rd, rs1, imm"
+    constraints: { rd: "0..31", rs1: "0..31", imm: "-2048..2047" }
     description: "Bitwise XOR Immediate: rd = rs1 ^ sign_extend(imm)"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -165,6 +180,7 @@ instructions:
     opcode: "0x13"
     funct3: "0x6"
     operands: "rd, rs1, imm"
+    constraints: { rd: "0..31", rs1: "0..31", imm: "-2048..2047" }
     description: "Bitwise OR Immediate: rd = rs1 | sign_extend(imm)"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -174,6 +190,7 @@ instructions:
     opcode: "0x13"
     funct3: "0x7"
     operands: "rd, rs1, imm"
+    constraints: { rd: "0..31", rs1: "0..31", imm: "-2048..2047" }
     description: "Bitwise AND Immediate: rd = rs1 & sign_extend(imm)"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -184,6 +201,7 @@ instructions:
     funct3: "0x1"
     funct7: "0x00"
     operands: "rd, rs1, shamt"
+    constraints: { rd: "0..31", rs1: "0..31", shamt: "0..31" }
     description: "Shift Left Logical Immediate: rd = rs1 << shamt[4:0]"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -194,6 +212,7 @@ instructions:
     funct3: "0x5"
     funct7: "0x00"
     operands: "rd, rs1, shamt"
+    constraints: { rd: "0..31", rs1: "0..31", shamt: "0..31" }
     description: "Shift Right Logical Immediate: rd = rs1 >> shamt[4:0]"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -204,6 +223,7 @@ instructions:
     funct3: "0x5"
     funct7: "0x20"
     operands: "rd, rs1, shamt"
+    constraints: { rd: "0..31", rs1: "0..31", shamt: "0..31" }
     description: "Shift Right Arithmetic Immediate: rd = rs1 >>> shamt[4:0]"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -216,6 +236,7 @@ instructions:
     opcode: "0x03"
     funct3: "0x0"
     operands: "rd, offset(rs1)"
+    constraints: { rd: "0..31", rs1: "0..31", offset: "-2048..2047" }
     description: "Load Byte (signed): rd = sign_extend(Mem8[rs1 + imm])"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -225,6 +246,7 @@ instructions:
     opcode: "0x03"
     funct3: "0x1"
     operands: "rd, offset(rs1)"
+    constraints: { rd: "0..31", rs1: "0..31", offset: "-2048..2047" }
     description: "Load Halfword (signed): rd = sign_extend(Mem16[rs1 + imm])"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -234,6 +256,7 @@ instructions:
     opcode: "0x03"
     funct3: "0x2"
     operands: "rd, offset(rs1)"
+    constraints: { rd: "0..31", rs1: "0..31", offset: "-2048..2047" }
     description: "Load Word: rd = Mem32[rs1 + imm]"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -243,6 +266,7 @@ instructions:
     opcode: "0x03"
     funct3: "0x4"
     operands: "rd, offset(rs1)"
+    constraints: { rd: "0..31", rs1: "0..31", offset: "-2048..2047" }
     description: "Load Byte Unsigned: rd = zero_extend(Mem8[rs1 + imm])"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -252,6 +276,7 @@ instructions:
     opcode: "0x03"
     funct3: "0x5"
     operands: "rd, offset(rs1)"
+    constraints: { rd: "0..31", rs1: "0..31", offset: "-2048..2047" }
     description: "Load Halfword Unsigned: rd = zero_extend(Mem16[rs1 + imm])"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -264,6 +289,7 @@ instructions:
     opcode: "0x23"
     funct3: "0x0"
     operands: "rs2, offset(rs1)"
+    constraints: { rs1: "0..31", rs2: "0..31", offset: "-2048..2047" }
     description: "Store Byte: Mem8[rs1 + imm] = rs2[7:0]"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -273,6 +299,7 @@ instructions:
     opcode: "0x23"
     funct3: "0x1"
     operands: "rs2, offset(rs1)"
+    constraints: { rs1: "0..31", rs2: "0..31", offset: "-2048..2047" }
     description: "Store Halfword: Mem16[rs1 + imm] = rs2[15:0]"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -282,6 +309,7 @@ instructions:
     opcode: "0x23"
     funct3: "0x2"
     operands: "rs2, offset(rs1)"
+    constraints: { rs1: "0..31", rs2: "0..31", offset: "-2048..2047" }
     description: "Store Word: Mem32[rs1 + imm] = rs2[31:0]"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -294,6 +322,7 @@ instructions:
     opcode: "0x63"
     funct3: "0x0"
     operands: "rs1, rs2, offset"
+    constraints: { rs1: "0..31", rs2: "0..31", offset: "-4096..4094, align=2" }
     description: "Branch if Equal: if (rs1 == rs2) PC += offset"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -303,6 +332,7 @@ instructions:
     opcode: "0x63"
     funct3: "0x1"
     operands: "rs1, rs2, offset"
+    constraints: { rs1: "0..31", rs2: "0..31", offset: "-4096..4094, align=2" }
     description: "Branch if Not Equal: if (rs1 != rs2) PC += offset"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -312,6 +342,7 @@ instructions:
     opcode: "0x63"
     funct3: "0x4"
     operands: "rs1, rs2, offset"
+    constraints: { rs1: "0..31", rs2: "0..31", offset: "-4096..4094, align=2" }
     description: "Branch if Less Than (signed): if (rs1 < rs2) PC += offset"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -321,6 +352,7 @@ instructions:
     opcode: "0x63"
     funct3: "0x5"
     operands: "rs1, rs2, offset"
+    constraints: { rs1: "0..31", rs2: "0..31", offset: "-4096..4094, align=2" }
     description: "Branch if Greater or Equal (signed): if (rs1 >= rs2) PC += offset"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -330,6 +362,7 @@ instructions:
     opcode: "0x63"
     funct3: "0x6"
     operands: "rs1, rs2, offset"
+    constraints: { rs1: "0..31", rs2: "0..31", offset: "-4096..4094, align=2" }
     description: "Branch if Less Than Unsigned: if (unsigned(rs1) < unsigned(rs2)) PC += offset"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -339,6 +372,7 @@ instructions:
     opcode: "0x63"
     funct3: "0x7"
     operands: "rs1, rs2, offset"
+    constraints: { rs1: "0..31", rs2: "0..31", offset: "-4096..4094, align=2" }
     description: "Branch if Greater or Equal Unsigned: if (unsigned(rs1) >= unsigned(rs2)) PC += offset"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -350,6 +384,7 @@ instructions:
     format: "J"
     opcode: "0x6F"
     operands: "rd, offset"
+    constraints: { rd: "0..31", offset: "-1048576..1048574, align=2" }
     description: "Jump and Link: rd = PC + 4; PC += offset"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -359,6 +394,7 @@ instructions:
     opcode: "0x67"
     funct3: "0x0"
     operands: "rd, offset(rs1)"
+    constraints: { rd: "0..31", rs1: "0..31", offset: "-2048..2047" }
     description: "Jump and Link Register: rd = PC + 4; PC = (rs1 + offset) & ~1"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -367,6 +403,7 @@ instructions:
     format: "U"
     opcode: "0x37"
     operands: "rd, imm"
+    constraints: { rd: "0..31", imm: "0..1048575 (20 bits)" }
     description: "Load Upper Immediate: rd = imm[31:12] << 12"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -375,6 +412,7 @@ instructions:
     format: "U"
     opcode: "0x17"
     operands: "rd, imm"
+    constraints: { rd: "0..31", imm: "0..1048575 (20 bits)" }
     description: "Add Upper Immediate to PC: rd = PC + (imm[31:12] << 12)"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -388,6 +426,7 @@ instructions:
     funct3: "0x0"
     funct7: "0x01"
     operands: "rd, rs1, rs2"
+    constraints: { rd: "0..31", rs1: "0..31", rs2: "0..31" }
     description: "Multiply (lower 32 bits): rd = (rs1 * rs2)[31:0]"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -398,6 +437,7 @@ instructions:
     funct3: "0x1"
     funct7: "0x01"
     operands: "rd, rs1, rs2"
+    constraints: { rd: "0..31", rs1: "0..31", rs2: "0..31" }
     description: "Multiply High (signed * signed): rd = (rs1 * rs2)[63:32]"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -408,6 +448,7 @@ instructions:
     funct3: "0x2"
     funct7: "0x01"
     operands: "rd, rs1, rs2"
+    constraints: { rd: "0..31", rs1: "0..31", rs2: "0..31" }
     description: "Multiply High (signed * unsigned): rd = (rs1 * unsigned(rs2))[63:32]"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -418,6 +459,7 @@ instructions:
     funct3: "0x3"
     funct7: "0x01"
     operands: "rd, rs1, rs2"
+    constraints: { rd: "0..31", rs1: "0..31", rs2: "0..31" }
     description: "Multiply High Unsigned: rd = (unsigned(rs1) * unsigned(rs2))[63:32]"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -428,6 +470,7 @@ instructions:
     funct3: "0x4"
     funct7: "0x01"
     operands: "rd, rs1, rs2"
+    constraints: { rd: "0..31", rs1: "0..31", rs2: "0..31" }
     description: "Signed Division: rd = rs1 / rs2"
     cycles: 33
     profile: "AN32-Bare-v1"
@@ -438,6 +481,7 @@ instructions:
     funct3: "0x5"
     funct7: "0x01"
     operands: "rd, rs1, rs2"
+    constraints: { rd: "0..31", rs1: "0..31", rs2: "0..31" }
     description: "Unsigned Division: rd = unsigned(rs1) / unsigned(rs2)"
     cycles: 33
     profile: "AN32-Bare-v1"
@@ -448,6 +492,7 @@ instructions:
     funct3: "0x6"
     funct7: "0x01"
     operands: "rd, rs1, rs2"
+    constraints: { rd: "0..31", rs1: "0..31", rs2: "0..31" }
     description: "Signed Remainder: rd = rs1 % rs2"
     cycles: 33
     profile: "AN32-Bare-v1"
@@ -458,6 +503,7 @@ instructions:
     funct3: "0x7"
     funct7: "0x01"
     operands: "rd, rs1, rs2"
+    constraints: { rd: "0..31", rs1: "0..31", rs2: "0..31" }
     description: "Unsigned Remainder: rd = unsigned(rs1) % unsigned(rs2)"
     cycles: 33
     profile: "AN32-Bare-v1"
@@ -471,6 +517,7 @@ instructions:
     funct3: "0x0"
     funct7: "0x00"
     operands: "cd, cs1, rs2"
+    constraints: { cd: "0..7", cs1: "0..7", rs2: "0..31" }
     description: "Set Capability Bounds: cd = cs1 with base=cs1.base+cs1.offset, len=rs2, offset=0"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -481,6 +528,7 @@ instructions:
     funct3: "0x1"
     funct7: "0x00"
     operands: "cd, cs1, rs2"
+    constraints: { cd: "0..7", cs1: "0..7", rs2: "0..31" }
     description: "Restrict Capability Permissions: cd = cs1 with perms = cs1.perms & rs2[2:0]"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -491,6 +539,7 @@ instructions:
     funct3: "0x2"
     funct7: "0x00"
     operands: "cd, cs1, rs2"
+    constraints: { cd: "0..7", cs1: "0..7", rs2: "0..31" }
     description: "Increment Capability Offset: cd = cs1 with offset = cs1.offset + rs2"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -501,6 +550,7 @@ instructions:
     funct3: "0x3"
     funct7: "0x00"
     operands: "rd, cs1"
+    constraints: { rd: "0..31", cs1: "0..7", rs2: "ignored/0" }
     description: "Get Capability Base: rd = cs1.base"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -511,6 +561,7 @@ instructions:
     funct3: "0x4"
     funct7: "0x00"
     operands: "rd, cs1"
+    constraints: { rd: "0..31", cs1: "0..7", rs2: "ignored/0" }
     description: "Get Capability Length: rd = cs1.length"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -521,6 +572,7 @@ instructions:
     funct3: "0x5"
     funct7: "0x00"
     operands: "rd, cs1"
+    constraints: { rd: "0..31", cs1: "0..7", rs2: "ignored/0" }
     description: "Get Capability Tag: rd = cs1.tag ? 1 : 0"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -531,6 +583,7 @@ instructions:
     funct3: "0x6"
     funct7: "0x00"
     operands: "rd, cs1"
+    constraints: { rd: "0..31", cs1: "0..7", rs2: "ignored/0" }
     description: "Get Capability Permissions: rd = cs1.perms"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -541,6 +594,7 @@ instructions:
     funct3: "0x7"
     funct7: "0x00"
     operands: "rd, cs1"
+    constraints: { rd: "0..31", cs1: "0..7", rs2: "ignored/0" }
     description: "Get Capability Offset: rd = cs1.offset"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -551,63 +605,71 @@ instructions:
     funct3: "0x7"
     funct7: "0x01"
     operands: "cd"
+    constraints: { cd: "0..7", cs1: "ignored/0", rs2: "ignored/0" }
     description: "Clear Capability Register: cd = nullCapability (tag=0)"
     cycles: 1
     profile: "AN32-Bare-v1"
 
   # ===========================================================================
   # 9. CapabilityLite Custom-1: Memory Access Instructions (Opcode = 0x2B) [6]
+  # Note: Loads use I-type immediate (CAP_MEM_I); Stores use S-type (CAP_MEM_S)
   # ===========================================================================
   - mnemonic: "clb"
-    format: "CAP_MEM"
+    format: "CAP_MEM_I"
     opcode: "0x2B"
     funct3: "0x0"
     operands: "rd, offset(cs1)"
+    constraints: { rd: "0..31", cs1: "0..7", offset: "-2048..2047" }
     description: "Capability-Protected Load Byte (signed): checks cs1 tag/bounds/read_perm, then rd = sign_extend(Mem8[cs1.base+cs1.offset+imm])"
     cycles: 1
     profile: "AN32-Bare-v1"
 
   - mnemonic: "clh"
-    format: "CAP_MEM"
+    format: "CAP_MEM_I"
     opcode: "0x2B"
     funct3: "0x1"
     operands: "rd, offset(cs1)"
+    constraints: { rd: "0..31", cs1: "0..7", offset: "-2048..2047" }
     description: "Capability-Protected Load Halfword (signed): checks cs1 tag/bounds/read_perm, then rd = sign_extend(Mem16[cs1.base+cs1.offset+imm])"
     cycles: 1
     profile: "AN32-Bare-v1"
 
   - mnemonic: "clw"
-    format: "CAP_MEM"
+    format: "CAP_MEM_I"
     opcode: "0x2B"
     funct3: "0x2"
     operands: "rd, offset(cs1)"
+    constraints: { rd: "0..31", cs1: "0..7", offset: "-2048..2047" }
     description: "Capability-Protected Load Word: checks cs1 tag/bounds/read_perm, then rd = Mem32[cs1.base+cs1.offset+imm]"
     cycles: 1
     profile: "AN32-Bare-v1"
 
   - mnemonic: "csb"
-    format: "CAP_MEM"
+    format: "CAP_MEM_S"
     opcode: "0x2B"
     funct3: "0x4"
     operands: "rs2, offset(cs1)"
+    constraints: { rs2: "0..31", cs1: "0..7", offset: "-2048..2047" }
     description: "Capability-Protected Store Byte: checks cs1 tag/bounds/write_perm, then Mem8[cs1.base+cs1.offset+imm] = rs2[7:0]"
     cycles: 1
     profile: "AN32-Bare-v1"
 
   - mnemonic: "csh"
-    format: "CAP_MEM"
+    format: "CAP_MEM_S"
     opcode: "0x2B"
     funct3: "0x5"
     operands: "rs2, offset(cs1)"
+    constraints: { rs2: "0..31", cs1: "0..7", offset: "-2048..2047" }
     description: "Capability-Protected Store Halfword: checks cs1 tag/bounds/write_perm, then Mem16[cs1.base+cs1.offset+imm] = rs2[15:0]"
     cycles: 1
     profile: "AN32-Bare-v1"
 
   - mnemonic: "csw"
-    format: "CAP_MEM"
+    format: "CAP_MEM_S"
     opcode: "0x2B"
     funct3: "0x6"
     operands: "rs2, offset(cs1)"
+    constraints: { rs2: "0..31", cs1: "0..7", offset: "-2048..2047" }
     description: "Capability-Protected Store Word: checks cs1 tag/bounds/write_perm, then Mem32[cs1.base+cs1.offset+imm] = rs2[31:0]"
     cycles: 1
     profile: "AN32-Bare-v1"
@@ -676,6 +738,7 @@ future_system_instructions:
     funct7: "0x09" # 7'b0001001
     fixed_rd: "x0 (0)"
     operands: "rs1, rs2" # rs1 = vaddr, rs2 = asid
+    constraints: { rd: "fixed 0", rs1: "0..31", rs2: "0..31" }
     description: "TLB Invalidation / Memory-Management Fence (rd=x0)"
     cycles: 2
     profile: "AN32-System-v1"
