@@ -69,15 +69,15 @@ export const Lab3HazardVisualizer: React.FC<Lab3Props> = ({
         <div className="control-group">
           <div className="metric-pill">
             <span className="metric-pill-label">LOAD-USE STALLS</span>
-            <span className="metric-pill-val">{state?.mmio.LOAD_USE_STALL_COUNT ?? 0}</span>
+            <span className="metric-pill-val">{state?.mmio?.LOAD_USE_STALL_COUNT ?? 0}</span>
           </div>
           <div className="metric-pill">
             <span className="metric-pill-label">BRANCHES TAKEN</span>
-            <span className="metric-pill-val">{state?.mmio.BRANCH_TAKEN_COUNT ?? 0}</span>
+            <span className="metric-pill-val">{state?.mmio?.BRANCH_TAKEN_COUNT ?? 0}</span>
           </div>
           <div className="metric-pill">
             <span className="metric-pill-label">TOTAL STALL CYCLES</span>
-            <span className="metric-pill-val">{state?.mmio.PIPELINE_STALL_COUNT ?? 0}</span>
+            <span className="metric-pill-val">{state?.mmio?.PIPELINE_STALL_COUNT ?? 0}</span>
           </div>
         </div>
       </div>

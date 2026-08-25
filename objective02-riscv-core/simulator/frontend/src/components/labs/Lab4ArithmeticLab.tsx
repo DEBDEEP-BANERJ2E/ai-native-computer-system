@@ -19,7 +19,7 @@ export const Lab4ArithmeticLab: React.FC<Lab4Props> = ({
   onRun,
   onReset,
 }) => {
-  const dividerRemaining = state?.signals.dividerIterationRemaining ?? 32;
+  const dividerRemaining = state?.signals?.dividerIterationRemaining ?? 32;
   const dividerCompleted = 32 - dividerRemaining;
 
   return (
@@ -66,8 +66,8 @@ export const Lab4ArithmeticLab: React.FC<Lab4Props> = ({
         <div className="control-group">
           <div className="metric-pill">
             <span className="metric-pill-label">DIVIDER STATUS</span>
-            <span className="metric-pill-val" style={{ color: state?.signals.dividerBusy ? "var(--accent-amber)" : "var(--accent-emerald)" }}>
-              {state?.signals.dividerBusy ? "COMPUTING" : "IDLE"}
+            <span className="metric-pill-val" style={{ color: state?.signals?.dividerBusy ? "var(--accent-amber)" : "var(--accent-emerald)" }}>
+              {state?.signals?.dividerBusy ? "COMPUTING" : "IDLE"}
             </span>
           </div>
           <div className="metric-pill">
@@ -76,7 +76,7 @@ export const Lab4ArithmeticLab: React.FC<Lab4Props> = ({
           </div>
           <div className="metric-pill">
             <span className="metric-pill-label">DIV BUSY CYCLES TOTAL</span>
-            <span className="metric-pill-val">{state?.mmio.DIV_BUSY_CYCLES ?? 0}</span>
+            <span className="metric-pill-val">{state?.mmio?.DIV_BUSY_CYCLES ?? 0}</span>
           </div>
         </div>
       </div>

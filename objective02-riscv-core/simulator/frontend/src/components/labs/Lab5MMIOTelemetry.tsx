@@ -59,15 +59,15 @@ export const Lab5MMIOTelemetry: React.FC<Lab5Props> = ({
         <div className="control-group">
           <div className="metric-pill">
             <span className="metric-pill-label">CLA SWITCHING</span>
-            <span className="metric-pill-val">{state?.mmio.CLA_SWITCHING ?? 0}</span>
+            <span className="metric-pill-val">{state?.mmio?.CLA_SWITCHING ?? 0}</span>
           </div>
           <div className="metric-pill">
             <span className="metric-pill-label">MUL THERMAL</span>
-            <span className="metric-pill-val">{state?.mmio.MUL_THERMAL ?? 0}</span>
+            <span className="metric-pill-val">{state?.mmio?.MUL_THERMAL ?? 0}</span>
           </div>
           <div className="metric-pill">
             <span className="metric-pill-label">EDP CURRENT</span>
-            <span className="metric-pill-val">{state?.mmio.EDP_CURRENT ?? 0}</span>
+            <span className="metric-pill-val">{state?.mmio?.EDP_CURRENT ?? 0}</span>
           </div>
         </div>
       </div>

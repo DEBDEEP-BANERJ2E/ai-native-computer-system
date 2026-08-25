@@ -82,18 +82,18 @@ export const Lab7AttackTrapDemo: React.FC<Lab7Props> = ({
         <div className="control-group">
           <div className="metric-pill">
             <span className="metric-pill-label">TRAP ACTIVE</span>
-            <span className="metric-pill-val" style={{ color: state?.signals.trapActive ? "var(--accent-magenta)" : "var(--accent-emerald)" }}>
-              {state?.signals.trapActive ? "1 (IN HANDLER)" : "0 (NORMAL)"}
+            <span className="metric-pill-val" style={{ color: state?.signals?.trapActive ? "var(--accent-magenta)" : "var(--accent-emerald)" }}>
+              {state?.signals?.trapActive ? "1 (IN HANDLER)" : "0 (NORMAL)"}
             </span>
           </div>
           <div className="metric-pill">
             <span className="metric-pill-label">TRAP EPC</span>
-            <span className="metric-pill-val">0x{(state?.mmio.TRAP_EPC ?? 0).toString(16).padStart(8, "0").toUpperCase()}</span>
+            <span className="metric-pill-val">0x{(state?.mmio?.TRAP_EPC ?? 0).toString(16).padStart(8, "0").toUpperCase()}</span>
           </div>
           <div className="metric-pill">
             <span className="metric-pill-label">DOUBLE FAULT</span>
-            <span className="metric-pill-val" style={{ color: state?.signals.doubleFault ? "var(--accent-red)" : "var(--text-muted)" }}>
-              {state?.signals.doubleFault ? "LATCHED" : "NONE"}
+            <span className="metric-pill-val" style={{ color: state?.signals?.doubleFault ? "var(--accent-red)" : "var(--text-muted)" }}>
+              {state?.signals?.doubleFault ? "LATCHED" : "NONE"}
             </span>
           </div>
         </div>
