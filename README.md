@@ -205,7 +205,7 @@ they are not intended as the final CPU interface.
   - Full 5-stage hazard-forwarding pipelined core + baseline SingleCycleCore.
   - Complete RV32M hardware multiplier & 33-cycle restoring iterative divider with trap abort.
   - Cross-layer System MMIO, hardware telemetry, performance counters, and OS scheduler context registers.
-  - CapabilityLite 101-bit hardware security, 33-bit widened bounds checking, and immutable roots.
+  - CapabilityLite 100-bit hardware security, 33-bit widened bounds checking, and immutable roots.
   - Precise exception model, atomic writeback suppression, younger-stage squashing, and trap vectoring.
   - 108 Chisel tests (100% green) + 18 cross-model differential verification benchmark suites (223 retirement points verified).
   - Interactive RVSecure Workbench observatory (`http://localhost:5174`).

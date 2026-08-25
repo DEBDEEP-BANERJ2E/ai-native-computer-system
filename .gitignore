@@ -134,3 +134,16 @@ objective01-digital-logic/simulator/frontend/dist/
 # Source documents (not for repo distribution)
 Computer_System_Project_10_Objectives_Undergraduate_Guide.docx
 project_idea.pdf
+
+# Toolchain build artifacts
+toolchain/build/
+toolchain/bin/
+toolchain/lib/
+toolchain/verification/generate_vectors
+toolchain/verification/test_vectors.csv
+toolchain/verification/target/
+toolchain/verification/project/target/
+toolchain/verification/test_run_dir/
+*.o
+*.a
+
