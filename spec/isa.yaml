@@ -1,0 +1,655 @@
+# AI-Native Computer System: Canonical ISA Database v1.0
+# Derived directly from frozen Chisel implementation:
+# - objective02/isa/Opcodes.scala
+# - objective02/decode/Decoder.scala
+# - objective02/capability/CapabilityLite.scala
+# - objective02/execute/RV32MMultiplier.scala
+# - objective02/execute/IterativeDivider.scala
+
+instructions:
+  # ===========================================================================
+  # 1. RV32I Base Integer Instructions: R-Type (Opcode = 0x33, 7'b0110011)
+  # ===========================================================================
+  - mnemonic: "add"
+    format: "R"
+    opcode: "0x33"
+    funct3: "0x0"
+    funct7: "0x00"
+    operands: "rd, rs1, rs2"
+    description: "Integer Addition: rd = rs1 + rs2"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "sub"
+    format: "R"
+    opcode: "0x33"
+    funct3: "0x0"
+    funct7: "0x20"
+    operands: "rd, rs1, rs2"
+    description: "Integer Subtraction: rd = rs1 - rs2"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "sll"
+    format: "R"
+    opcode: "0x33"
+    funct3: "0x1"
+    funct7: "0x00"
+    operands: "rd, rs1, rs2"
+    description: "Shift Left Logical: rd = rs1 << rs2[4:0]"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "slt"
+    format: "R"
+    opcode: "0x33"
+    funct3: "0x2"
+    funct7: "0x00"
+    operands: "rd, rs1, rs2"
+    description: "Set Less Than (signed): rd = (rs1 < rs2) ? 1 : 0"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "sltu"
+    format: "R"
+    opcode: "0x33"
+    funct3: "0x3"
+    funct7: "0x00"
+    operands: "rd, rs1, rs2"
+    description: "Set Less Than Unsigned: rd = (unsigned(rs1) < unsigned(rs2)) ? 1 : 0"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "xor"
+    format: "R"
+    opcode: "0x33"
+    funct3: "0x4"
+    funct7: "0x00"
+    operands: "rd, rs1, rs2"
+    description: "Bitwise XOR: rd = rs1 ^ rs2"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "srl"
+    format: "R"
+    opcode: "0x33"
+    funct3: "0x5"
+    funct7: "0x00"
+    operands: "rd, rs1, rs2"
+    description: "Shift Right Logical: rd = rs1 >> rs2[4:0] (zero-fill)"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "sra"
+    format: "R"
+    opcode: "0x33"
+    funct3: "0x5"
+    funct7: "0x20"
+    operands: "rd, rs1, rs2"
+    description: "Shift Right Arithmetic: rd = rs1 >>> rs2[4:0] (sign-fill)"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "or"
+    format: "R"
+    opcode: "0x33"
+    funct3: "0x6"
+    funct7: "0x00"
+    operands: "rd, rs1, rs2"
+    description: "Bitwise OR: rd = rs1 | rs2"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "and"
+    format: "R"
+    opcode: "0x33"
+    funct3: "0x7"
+    funct7: "0x00"
+    operands: "rd, rs1, rs2"
+    description: "Bitwise AND: rd = rs1 & rs2"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  # ===========================================================================
+  # 2. RV32I Base Integer Instructions: I-Type Arithmetic (Opcode = 0x13, 7'b0010011)
+  # ===========================================================================
+  - mnemonic: "addi"
+    format: "I"
+    opcode: "0x13"
+    funct3: "0x0"
+    operands: "rd, rs1, imm"
+    description: "Add Immediate: rd = rs1 + sign_extend(imm[11:0])"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "slti"
+    format: "I"
+    opcode: "0x13"
+    funct3: "0x2"
+    operands: "rd, rs1, imm"
+    description: "Set Less Than Immediate (signed): rd = (rs1 < sign_extend(imm)) ? 1 : 0"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "sltiu"
+    format: "I"
+    opcode: "0x13"
+    funct3: "0x3"
+    operands: "rd, rs1, imm"
+    description: "Set Less Than Immediate Unsigned: rd = (unsigned(rs1) < unsigned(imm)) ? 1 : 0"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "xori"
+    format: "I"
+    opcode: "0x13"
+    funct3: "0x4"
+    operands: "rd, rs1, imm"
+    description: "Bitwise XOR Immediate: rd = rs1 ^ sign_extend(imm)"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "ori"
+    format: "I"
+    opcode: "0x13"
+    funct3: "0x6"
+    operands: "rd, rs1, imm"
+    description: "Bitwise OR Immediate: rd = rs1 | sign_extend(imm)"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "andi"
+    format: "I"
+    opcode: "0x13"
+    funct3: "0x7"
+    operands: "rd, rs1, imm"
+    description: "Bitwise AND Immediate: rd = rs1 & sign_extend(imm)"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "slli"
+    format: "I"
+    opcode: "0x13"
+    funct3: "0x1"
+    funct7: "0x00"
+    operands: "rd, rs1, shamt"
+    description: "Shift Left Logical Immediate: rd = rs1 << shamt[4:0]"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "srli"
+    format: "I"
+    opcode: "0x13"
+    funct3: "0x5"
+    funct7: "0x00"
+    operands: "rd, rs1, shamt"
+    description: "Shift Right Logical Immediate: rd = rs1 >> shamt[4:0]"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "srai"
+    format: "I"
+    opcode: "0x13"
+    funct3: "0x5"
+    funct7: "0x20"
+    operands: "rd, rs1, shamt"
+    description: "Shift Right Arithmetic Immediate: rd = rs1 >>> shamt[4:0]"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  # ===========================================================================
+  # 3. RV32I Base Integer Instructions: Loads (Opcode = 0x03, 7'b0000011)
+  # ===========================================================================
+  - mnemonic: "lb"
+    format: "I"
+    opcode: "0x03"
+    funct3: "0x0"
+    operands: "rd, offset(rs1)"
+    description: "Load Byte (signed): rd = sign_extend(Mem8[rs1 + imm])"
+    cycles: 1 # In 5-stage pipeline (hazard interlock on load-use = 1 stall)
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "lh"
+    format: "I"
+    opcode: "0x03"
+    funct3: "0x1"
+    operands: "rd, offset(rs1)"
+    description: "Load Halfword (signed): rd = sign_extend(Mem16[rs1 + imm])"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "lw"
+    format: "I"
+    opcode: "0x03"
+    funct3: "0x2"
+    operands: "rd, offset(rs1)"
+    description: "Load Word: rd = Mem32[rs1 + imm]"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "lbu"
+    format: "I"
+    opcode: "0x03"
+    funct3: "0x4"
+    operands: "rd, offset(rs1)"
+    description: "Load Byte Unsigned: rd = zero_extend(Mem8[rs1 + imm])"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "lhu"
+    format: "I"
+    opcode: "0x03"
+    funct3: "0x5"
+    operands: "rd, offset(rs1)"
+    description: "Load Halfword Unsigned: rd = zero_extend(Mem16[rs1 + imm])"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  # ===========================================================================
+  # 4. RV32I Base Integer Instructions: Stores (Opcode = 0x23, 7'b0100011)
+  # ===========================================================================
+  - mnemonic: "sb"
+    format: "S"
+    opcode: "0x23"
+    funct3: "0x0"
+    operands: "rs2, offset(rs1)"
+    description: "Store Byte: Mem8[rs1 + imm] = rs2[7:0]"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "sh"
+    format: "S"
+    opcode: "0x23"
+    funct3: "0x1"
+    operands: "rs2, offset(rs1)"
+    description: "Store Halfword: Mem16[rs1 + imm] = rs2[15:0]"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "sw"
+    format: "S"
+    opcode: "0x23"
+    funct3: "0x2"
+    operands: "rs2, offset(rs1)"
+    description: "Store Word: Mem32[rs1 + imm] = rs2[31:0]"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  # ===========================================================================
+  # 5. RV32I Base Integer Instructions: Control Flow Branches (Opcode = 0x63, 7'b1100011)
+  # ===========================================================================
+  - mnemonic: "beq"
+    format: "B"
+    opcode: "0x63"
+    funct3: "0x0"
+    operands: "rs1, rs2, offset"
+    description: "Branch if Equal: if (rs1 == rs2) PC += offset"
+    cycles: 1 # 2 flush cycles if taken
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "bne"
+    format: "B"
+    opcode: "0x63"
+    funct3: "0x1"
+    operands: "rs1, rs2, offset"
+    description: "Branch if Not Equal: if (rs1 != rs2) PC += offset"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "blt"
+    format: "B"
+    opcode: "0x63"
+    funct3: "0x4"
+    operands: "rs1, rs2, offset"
+    description: "Branch if Less Than (signed): if (rs1 < rs2) PC += offset"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "bge"
+    format: "B"
+    opcode: "0x63"
+    funct3: "0x5"
+    operands: "rs1, rs2, offset"
+    description: "Branch if Greater or Equal (signed): if (rs1 >= rs2) PC += offset"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "bltu"
+    format: "B"
+    opcode: "0x63"
+    funct3: "0x6"
+    operands: "rs1, rs2, offset"
+    description: "Branch if Less Than Unsigned: if (unsigned(rs1) < unsigned(rs2)) PC += offset"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "bgeu"
+    format: "B"
+    opcode: "0x63"
+    funct3: "0x7"
+    operands: "rs1, rs2, offset"
+    description: "Branch if Greater or Equal Unsigned: if (unsigned(rs1) >= unsigned(rs2)) PC += offset"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  # ===========================================================================
+  # 6. RV32I Base Integer Instructions: Jumps & Upper Immediates
+  # ===========================================================================
+  - mnemonic: "jal"
+    format: "J"
+    opcode: "0x6F"
+    operands: "rd, offset"
+    description: "Jump and Link: rd = PC + 4; PC += offset"
+    cycles: 1 # 2 flush cycles
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "jalr"
+    format: "I"
+    opcode: "0x67"
+    funct3: "0x0"
+    operands: "rd, offset(rs1)"
+    description: "Jump and Link Register: rd = PC + 4; PC = (rs1 + offset) & ~1"
+    cycles: 1 # 2 flush cycles
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "lui"
+    format: "U"
+    opcode: "0x37"
+    operands: "rd, imm"
+    description: "Load Upper Immediate: rd = imm[31:12] << 12"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "auipc"
+    format: "U"
+    opcode: "0x17"
+    operands: "rd, imm"
+    description: "Add Upper Immediate to PC: rd = PC + (imm[31:12] << 12)"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  # ===========================================================================
+  # 7. RV32M Standard Extension: Multiplier & Divider (Opcode = 0x33, funct7 = 0x01)
+  # ===========================================================================
+  - mnemonic: "mul"
+    format: "R"
+    opcode: "0x33"
+    funct3: "0x0"
+    funct7: "0x01"
+    operands: "rd, rs1, rs2"
+    description: "Multiply (lower 32 bits): rd = (rs1 * rs2)[31:0]"
+    cycles: 1 # Single-cycle Booth-Wallace 34-bit tree
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "mulh"
+    format: "R"
+    opcode: "0x33"
+    funct3: "0x1"
+    funct7: "0x01"
+    operands: "rd, rs1, rs2"
+    description: "Multiply High (signed * signed): rd = (rs1 * rs2)[63:32]"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "mulhsu"
+    format: "R"
+    opcode: "0x33"
+    funct3: "0x2"
+    funct7: "0x01"
+    operands: "rd, rs1, rs2"
+    description: "Multiply High (signed * unsigned): rd = (rs1 * unsigned(rs2))[63:32]"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "mulhu"
+    format: "R"
+    opcode: "0x33"
+    funct3: "0x3"
+    funct7: "0x01"
+    operands: "rd, rs1, rs2"
+    description: "Multiply High Unsigned: rd = (unsigned(rs1) * unsigned(rs2))[63:32]"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "div"
+    format: "R"
+    opcode: "0x33"
+    funct3: "0x4"
+    funct7: "0x01"
+    operands: "rd, rs1, rs2"
+    description: "Signed Division: rd = rs1 / rs2"
+    cycles: 33 # 32 compute cycles + 1 done cycle
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "divu"
+    format: "R"
+    opcode: "0x33"
+    funct3: "0x5"
+    funct7: "0x01"
+    operands: "rd, rs1, rs2"
+    description: "Unsigned Division: rd = unsigned(rs1) / unsigned(rs2)"
+    cycles: 33
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "rem"
+    format: "R"
+    opcode: "0x33"
+    funct3: "0x6"
+    funct7: "0x01"
+    operands: "rd, rs1, rs2"
+    description: "Signed Remainder: rd = rs1 % rs2"
+    cycles: 33
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "remu"
+    format: "R"
+    opcode: "0x33"
+    funct3: "0x7"
+    funct7: "0x01"
+    operands: "rd, rs1, rs2"
+    description: "Unsigned Remainder: rd = unsigned(rs1) % unsigned(rs2)"
+    cycles: 33
+    introduced_in: "AN32-Bare-v1"
+
+  # ===========================================================================
+  # 8. CapabilityLite Custom-0: Manipulation Instructions (Opcode = 0x0B, 7'b0001011)
+  # ===========================================================================
+  - mnemonic: "csetbounds"
+    format: "CAP_R"
+    opcode: "0x0B"
+    funct3: "0x0"
+    funct7: "0x00"
+    operands: "cd, cs1, rs2"
+    description: "Set Capability Bounds: cd = cs1 with base=cs1.base+cs1.offset, len=rs2, offset=0 (enforces monotonic reduction)"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "candperm"
+    format: "CAP_R"
+    opcode: "0x0B"
+    funct3: "0x1"
+    funct7: "0x00"
+    operands: "cd, cs1, rs2"
+    description: "Restrict Capability Permissions: cd = cs1 with perms = cs1.perms & rs2[2:0]"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "cincoffset"
+    format: "CAP_R"
+    opcode: "0x0B"
+    funct3: "0x2"
+    funct7: "0x00"
+    operands: "cd, cs1, rs2"
+    description: "Increment Capability Offset: cd = cs1 with offset = cs1.offset + rs2"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "cgetbase"
+    format: "CAP_R"
+    opcode: "0x0B"
+    funct3: "0x3"
+    funct7: "0x00"
+    operands: "rd, cs1"
+    description: "Get Capability Base: rd = cs1.base"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "cgetlen"
+    format: "CAP_R"
+    opcode: "0x0B"
+    funct3: "0x4"
+    funct7: "0x00"
+    operands: "rd, cs1"
+    description: "Get Capability Length: rd = cs1.length"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "cgettag"
+    format: "CAP_R"
+    opcode: "0x0B"
+    funct3: "0x5"
+    funct7: "0x00"
+    operands: "rd, cs1"
+    description: "Get Capability Tag: rd = cs1.tag ? 1 : 0"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "cgetperm"
+    format: "CAP_R"
+    opcode: "0x0B"
+    funct3: "0x6"
+    funct7: "0x00"
+    operands: "rd, cs1"
+    description: "Get Capability Permissions: rd = cs1.perms"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "cgetoffset"
+    format: "CAP_R"
+    opcode: "0x0B"
+    funct3: "0x7"
+    funct7: "0x00"
+    operands: "rd, cs1"
+    description: "Get Capability Offset: rd = cs1.offset"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "cclear"
+    format: "CAP_R"
+    opcode: "0x0B"
+    funct3: "0x7"
+    funct7: "0x01"
+    operands: "cd"
+    description: "Clear Capability Register: cd = nullCapability (tag=0)"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  # ===========================================================================
+  # 9. CapabilityLite Custom-1: Memory Access Instructions (Opcode = 0x2B, 7'b0101011)
+  # ===========================================================================
+  - mnemonic: "clb"
+    format: "CAP_MEM"
+    opcode: "0x2B"
+    funct3: "0x0"
+    operands: "rd, offset(cs1)"
+    description: "Capability-Protected Load Byte (signed): checks cs1 tag/bounds/read_perm, then rd = sign_extend(Mem8[cs1.base+cs1.offset+imm])"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "clh"
+    format: "CAP_MEM"
+    opcode: "0x2B"
+    funct3: "0x1"
+    operands: "rd, offset(cs1)"
+    description: "Capability-Protected Load Halfword (signed): checks cs1 tag/bounds/read_perm, then rd = sign_extend(Mem16[cs1.base+cs1.offset+imm])"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "clw"
+    format: "CAP_MEM"
+    opcode: "0x2B"
+    funct3: "0x2"
+    operands: "rd, offset(cs1)"
+    description: "Capability-Protected Load Word: checks cs1 tag/bounds/read_perm, then rd = Mem32[cs1.base+cs1.offset+imm]"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "csb"
+    format: "CAP_MEM"
+    opcode: "0x2B"
+    funct3: "0x4"
+    operands: "rs2, offset(cs1)"
+    description: "Capability-Protected Store Byte: checks cs1 tag/bounds/write_perm, then Mem8[cs1.base+cs1.offset+imm] = rs2[7:0]"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "csh"
+    format: "CAP_MEM"
+    opcode: "0x2B"
+    funct3: "0x5"
+    operands: "rs2, offset(cs1)"
+    description: "Capability-Protected Store Halfword: checks cs1 tag/bounds/write_perm, then Mem16[cs1.base+cs1.offset+imm] = rs2[15:0]"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  - mnemonic: "csw"
+    format: "CAP_MEM"
+    opcode: "0x2B"
+    funct3: "0x6"
+    operands: "rs2, offset(cs1)"
+    description: "Capability-Protected Store Word: checks cs1 tag/bounds/write_perm, then Mem32[cs1.base+cs1.offset+imm] = rs2[31:0]"
+    cycles: 1
+    introduced_in: "AN32-Bare-v1"
+
+  # ===========================================================================
+  # 10. Privileged System Instructions (AN32-System-v1 Only - Traps in Bare-v1)
+  # ===========================================================================
+  - mnemonic: "ecall"
+    format: "I"
+    opcode: "0x73"
+    funct3: "0x0"
+    funct12: "0x000"
+    operands: ""
+    description: "Environment Call: System call exception vectoring"
+    cycles: 2
+    introduced_in: "AN32-System-v1"
+
+  - mnemonic: "ebreak"
+    format: "I"
+    opcode: "0x73"
+    funct3: "0x0"
+    funct12: "0x001"
+    operands: ""
+    description: "Environment Break: Software breakpoint exception"
+    cycles: 2
+    introduced_in: "AN32-System-v1"
+
+  - mnemonic: "mret"
+    format: "I"
+    opcode: "0x73"
+    funct3: "0x0"
+    funct12: "0x302"
+    operands: ""
+    description: "Machine-Mode Return from Trap"
+    cycles: 2
+    introduced_in: "AN32-System-v1"
+
+  - mnemonic: "sret"
+    format: "I"
+    opcode: "0x73"
+    funct3: "0x0"
+    funct12: "0x102"
+    operands: ""
+    description: "Supervisor-Mode Return from Trap"
+    cycles: 2
+    introduced_in: "AN32-System-v1"
+
+  - mnemonic: "sfence.vma"
+    format: "R"
+    opcode: "0x73"
+    funct3: "0x0"
+    funct7: "0x09"
+    operands: "rs1, rs2"
+    description: "TLB Invalidation / Memory-Management Fence (rs1=vaddr, rs2=asid)"
+    cycles: 2
+    introduced_in: "AN32-System-v1"

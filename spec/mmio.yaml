@@ -1,0 +1,206 @@
+# AI-Native Computer System: Memory-Mapped I/O (MMIO) Specification v1.0
+# Derived directly from objective02/system/MMIOAddress.scala and SystemMMIO.scala
+
+aperture:
+  base: "0x80000000"
+  end: "0x8000FFFF"
+  size_bytes: 65536
+  access_alignment_bytes: 4
+  bus_latency_cycles: 1
+
+windows:
+  # ===========================================================================
+  # 1. Objective 1 Telemetry Subsystem Window (0x80001000 - 0x80001010)
+  # ===========================================================================
+  - name: "Objective 1 Telemetry Block"
+    base: "0x80001000"
+    end: "0x80001010"
+    registers:
+      - address: "0x80001000"
+        name: "REV_ENERGY_ACC"
+        access: "RO"
+        reset_value: "0x00000000"
+        description: "Reversible-operation activity accumulator proxy"
+
+      - address: "0x80001004"
+        name: "CLA_SWITCHING"
+        access: "RO"
+        reset_value: "0x00000000"
+        description: "Carry-lookahead adder bit transition counter"
+
+      - address: "0x80001008"
+        name: "MUL_THERMAL"
+        access: "RO"
+        reset_value: "0x00000000"
+        description: "Booth-Wallace multiplier switching activity proxy"
+
+      - address: "0x8000100C"
+        name: "EDP_CURRENT"
+        access: "RO"
+        reset_value: "0x00000000"
+        description: "Estimated Energy-Delay Product proxy"
+
+      - address: "0x80001010"
+        name: "EDP_CONFIG"
+        access: "RO"
+        reset_value: "0x00000001"
+        description: "Delay/configuration scale constant (RO=1)"
+
+  # ===========================================================================
+  # 2. Objective 2 System Control & Performance Counters (0x80002000 - 0x80002024)
+  # ===========================================================================
+  - name: "Objective 2 Core Control & Performance Counters"
+    base: "0x80002000"
+    end: "0x80002024"
+    registers:
+      - address: "0x80002000"
+        name: "BRANCH_CONFIDENCE"
+        access: "RO"
+        reset_value: "0x00000000"
+        description: "Branch predictor confidence proxy (RO=0)"
+
+      - address: "0x80002004"
+        name: "PROCESS_BEHAVIOR_CLASS"
+        access: "RW"
+        reset_value: "0x00000000"
+        description: "OS/Compiler thread behavioral classification (0: General, 1: Compute, 2: Memory, 3: Security)"
+
+      - address: "0x80002008"
+        name: "SCHED_HINT"
+        access: "RW"
+        reset_value: "0x00000000"
+        description: "Cross-layer scheduler core allocation hint (0: Default, 1: Turbo, 2: Low-Power, 3: Capability-Isolated)"
+
+      - address: "0x8000200C"
+        name: "RETIRED_COUNT"
+        access: "RO"
+        reset_value: "0x00000000"
+        description: "Hardware retired architectural instruction counter"
+
+      - address: "0x80002010"
+        name: "BRANCH_TAKEN_COUNT"
+        access: "RO"
+        reset_value: "0x00000000"
+        description: "Count of taken conditional branches"
+
+      - address: "0x80002014"
+        name: "LOAD_USE_STALL_COUNT"
+        access: "RO"
+        reset_value: "0x00000000"
+        description: "Hardware load-use interlock stall counter"
+
+      - address: "0x80002018"
+        name: "DIV_BUSY_CYCLES"
+        access: "RO"
+        reset_value: "0x00000000"
+        description: "Count of iterative divider compute busy cycles"
+
+      - address: "0x8000201C"
+        name: "PIPELINE_STALL_COUNT"
+        access: "RO"
+        reset_value: "0x00000000"
+        description: "Total frontend/pipeline stall cycle accumulator"
+
+      - address: "0x80002020"
+        name: "LAST_COMMIT_PC"
+        access: "RO"
+        reset_value: "0x00000000"
+        description: "PC of most recently retired instruction"
+
+      - address: "0x80002024"
+        name: "CURRENT_CONTEXT"
+        access: "RW"
+        reset_value: "0x00000000"
+        description: "Active OS task/thread context ID (Reset=0)"
+
+  # ===========================================================================
+  # 3. Objective 2 Security Event Sticky Logger (0x80002100 - 0x80002110)
+  # ===========================================================================
+  - name: "Objective 2 Security Event Logger"
+    base: "0x80002100"
+    end: "0x80002110"
+    registers:
+      - address: "0x80002100"
+        name: "SEC_STATUS"
+        access: "RW"
+        reset_value: "0x00000000"
+        description: "Bit 0: Violation pending flag. Write 1 to clear (W1C)."
+
+      - address: "0x80002104"
+        name: "SEC_PC"
+        access: "RO"
+        reset_value: "0x00000000"
+        description: "Offending instruction Program Counter"
+
+      - address: "0x80002108"
+        name: "SEC_ADDR"
+        access: "RO"
+        reset_value: "0x00000000"
+        description: "Offending target memory address"
+
+      - address: "0x8000210C"
+        name: "SEC_INFO"
+        access: "RO"
+        reset_value: "0x00000000"
+        description: "[5:4] accessType (0:Read, 1:Write, 2:Exec), [3:0] reason code (0:None, 1:Tag, 2:Bounds, 3:Perm, 4:Monotonic)"
+
+      - address: "0x80002110"
+        name: "SEC_CONTEXT"
+        access: "RO"
+        reset_value: "0x00000000"
+        description: "Process context ID active at violation time"
+
+  # ===========================================================================
+  # 4. Objective 2 Precise Security Trapping Subsystem (0x80002114 - 0x80002130)
+  # ===========================================================================
+  - name: "Objective 2 Precise Security Trap Subsystem"
+    base: "0x80002114"
+    end: "0x80002130"
+    registers:
+      - address: "0x80002114"
+        name: "TRAP_CONTROL"
+        access: "RW"
+        reset_value: "0x00000001" # Default enabled
+        description: "Bit 0: TRAP_ENABLE (1 = precise traps active)"
+
+      - address: "0x80002118"
+        name: "TRAP_STATUS"
+        access: "RW"
+        reset_value: "0x00000000"
+        description: "Bit 0: TRAP_ACTIVE (RO), Bit 1: DOUBLE_FAULT (W1C, Set-over-W1C priority)"
+
+      - address: "0x8000211C"
+        name: "TRAP_VECTOR"
+        access: "RW"
+        reset_value: "0x00000800" # 4-byte aligned reset base
+        description: "Base address of OS trap handler routine"
+
+      - address: "0x80002120"
+        name: "TRAP_EPC"
+        access: "RW"
+        reset_value: "0x00000000"
+        description: "Exception Program Counter (PC of faulting instruction in MEM stage)"
+
+      - address: "0x80002124"
+        name: "TRAP_CAUSE"
+        access: "RO"
+        reset_value: "0x00000000"
+        description: "Trap cause code: [5:4] accessType, [3:0] reason (0x10: Bounds, 0x11: Perm, 0x12: Deriv, 0x13: Seal, 0x14: Invalid Tag)"
+
+      - address: "0x80002128"
+        name: "TRAP_ADDR"
+        access: "RO"
+        reset_value: "0x00000000"
+        description: "Offending memory address that triggered the precise trap"
+
+      - address: "0x8000212C"
+        name: "TRAP_CONTEXT"
+        access: "RO"
+        reset_value: "0x00000000"
+        description: "Process context ID active at the moment of trap trigger"
+
+      - address: "0x80002130"
+        name: "TRAP_RETURN"
+        access: "WO"
+        reset_value: "0x00000000"
+        description: "Write 1 to return from trap handler (clears ACTIVE, vectors PC -> TRAP_EPC)"

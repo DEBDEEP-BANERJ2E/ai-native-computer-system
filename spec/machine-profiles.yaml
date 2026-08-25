@@ -1,0 +1,137 @@
+# AI-Native Computer System: Machine Profiles Specification v1.0
+# Canonical profile definitions distinguishing the frozen baseline (AN32-Bare-v1)
+# from the forward system architecture (AN32-System-v1).
+
+profiles:
+  - id: "AN32-Bare-v1"
+    name: "AN32 Bare-Metal Harvard Baseline (Frozen Objective-2 Core)"
+    status: "FROZEN_BASELINE"
+    purpose: "Bit-exact hardware contract with the frozen Objective-2 RV32IM PipelinedCore."
+    architecture:
+      isa_base: "RV32I"
+      isa_extensions:
+        - "RV32M (Multi-cycle hardware multiplier and 33-cycle non-restoring divider)"
+        - "CapabilityLite (100-bit spatial and permission bounded registers)"
+      xlen: 32
+      endianness: "little-endian"
+      instruction_length: 32
+      ialign: 32
+    memory_model:
+      type: "Harvard (Separate Instruction ROM & Data SRAM)"
+      instruction_memory:
+        type: "Chisel VecInit Synchronous ROM"
+        address_range: "0x00000000..0x00000FFF (Default 4KB, Elaboration-time baked)"
+        writable_at_runtime: false
+      data_memory:
+        type: "Byte-addressable SRAM"
+        address_range: "0x00000000..0x00000FFF (Default 4KB)"
+        writable_at_runtime: true
+        access_latency_cycles: 1
+      system_mmio:
+        aperture_range: "0x80000000..0x8000FFFF"
+        assigned_range: "0x80001000..0x80002130"
+        access_latency_cycles: 1
+    addressing:
+      mode: "Bare Physical"
+      virtual_memory: false
+      mmu: false
+      tlb: false
+      page_tables: false
+    capability_system:
+      metadata_bits: 100
+      fields:
+        tag: 1        # Tag == 1 (Valid), Tag == 0 (Invalid / NULL)
+        base: 32      # 32-bit base address
+        length: 32    # 32-bit length in bytes
+        perms: 3      # Bit 0: Read, Bit 1: Write, Bit 2: Exec (Reserved)
+        offset: 32    # 32-bit current offset
+      registers:
+        count: 8
+        immutable_roots:
+          - reg: "c0"
+            name: "NULL"
+            tag: 0
+            base: "0x00000000"
+            length: "0x00000000"
+            perms: 0
+            offset: "0x00000000"
+          - reg: "c1"
+            name: "RAM_ROOT"
+            tag: 1
+            base: "0x00000000"
+            length: "0x00001000"
+            perms: 3 # RW
+            offset: "0x00000000"
+          - reg: "c2"
+            name: "MMIO_ROOT"
+            tag: 1
+            base: "0x80000000"
+            length: "0x00010000"
+            perms: 3 # RW
+            offset: "0x00000000"
+        process_registers: ["c3", "c4", "c5", "c6", "c7"]
+    trap_system:
+      model: "Synchronous Precise Security Trapping"
+      trap_vector_register: "0x8000211C (Reset target: 0x00000800)"
+      status_register: "0x80002118 (Bit 0: ACTIVE, Bit 1: DOUBLE_FAULT W1C)"
+      security_logger_status: "0x80002100 (Bit 0: SEC_STATUS W1C)"
+      execution_behavior: "Combinational MEM-stage redirect (takePreciseTrap), atomic writeback suppression in MEM, younger stage squashing (IF/ID/EX), divider kill (io.kill), synchronous capture into TRAP_* registers."
+      return_mechanism: "Write 1 to TRAP_RETURN (0x80002130) resumes PC at TRAP_EPC."
+      system_instructions: "OP_SYSTEM (0x73, ECALL/CSR) traps as illegalInstruction."
+
+  - id: "AN32-System-v1"
+    name: "AN32 Full Privileged System Target (Scratch OS & Memory Hierarchy)"
+    status: "FORWARD_SPECIFICATION"
+    purpose: "Target hardware architecture for the from-scratch Operating System (Objective 3) and Memory Hierarchy (Objective 4)."
+    architecture:
+      isa_base: "RV32I"
+      isa_extensions:
+        - "RV32M (Hardware Multiplier & Divider)"
+        - "CapabilityLite (100-bit Integrated Security)"
+        - "Privileged System Extensions (M/S/U Modes, CSRs, ECALL, MRET/SRET, SATP, SFENCE.VMA)"
+      xlen: 32
+      endianness: "little-endian"
+      instruction_length: 32
+      ialign: 32
+    memory_model:
+      type: "Unified System Memory Hierarchy"
+      l1_instruction_cache: "4KB - 16KB, Direct/Set-Associative"
+      l1_data_cache: "4KB - 16KB, Write-Back / Write-Allocate"
+      l2_unified_cache: "64KB - 256KB"
+      main_memory: "Physical RAM (Near Tier) + Backing Store (Far Tier / SSD Block Device)"
+      program_loading: "Dynamic runtime executable loading via ELF32 Loader"
+    addressing:
+      mode: "Sv32 Virtual Memory + 34-bit Physical Addressing"
+      virtual_address_width: 32
+      physical_address_width: 34
+      page_size_bytes: 4096
+      virtual_address_format:
+        vpn1_bits: 10   # VA[31:22]
+        vpn0_bits: 10   # VA[21:12]
+        offset_bits: 12 # VA[11:0]
+      physical_address_format:
+        ppn_bits: 22    # PA[33:12] (PPN[1]=12 bits, PPN[0]=10 bits)
+        offset_bits: 12 # PA[11:0]
+      page_table_levels: 2
+      page_table_entry:
+        width_bits: 32
+        fields:
+          ppn: 22   # PTE[31:10]
+          rsvd: 2   # PTE[9:8] (Reserved for OS use)
+          D: 1      # PTE[7] (Dirty)
+          A: 1      # PTE[6] (Accessed)
+          G: 1      # PTE[5] (Global)
+          U: 1      # PTE[4] (User Mode Accessible)
+          X: 1      # PTE[3] (Executable)
+          W: 1      # PTE[2] (Writable)
+          R: 1      # PTE[1] (Readable)
+          V: 1      # PTE[0] (Valid PTE)
+      mmu_tlb:
+        tlb_entries: 32
+        asid_bits: 9
+        refill_mechanism: "Hardware Page-Table Walker"
+    fault_model:
+      capability_vs_page_fault:
+        order_of_evaluation: "Virtual Effective Address -> CapabilityLite Spatial/Perm Check -> MMU TLB/Page Walk -> Page Permission Check -> Physical Access."
+        capability_fault: "Triggered on Tag==0, out-of-bounds, or permission violation in Capability space (mcause = 0x10..0x14). Independent of MMU state."
+        page_fault: "Triggered when PTE.V == 0, privilege violation (PTE.U == 0 in user mode), or write to read-only page (PTE.W == 0) (mcause = 0x0C Instruction Page Fault, 0x0D Load Page Fault, 0x0F Store Page Fault)."

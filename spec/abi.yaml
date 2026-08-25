@@ -1,0 +1,191 @@
+# AI-Native Computer System: Integer Application Binary Interface (ABI) Specification v1.0
+# Standard ILP32 Calling Convention for AN32 Architectures
+
+data_model:
+  name: "ILP32"
+  xlen_bits: 32
+  pointer_size_bytes: 4
+  char_size_bytes: 1
+  short_size_bytes: 2
+  int_size_bytes: 4
+  long_size_bytes: 4
+  long_long_size_bytes: 8
+  float_size_bytes: 4
+  double_size_bytes: 8
+  stack_alignment_bytes: 16
+
+registers:
+  - index: 0
+    name: "x0"
+    abi_name: "zero"
+    saver: "None"
+    role: "Hardwired zero constant"
+  - index: 1
+    name: "x1"
+    abi_name: "ra"
+    saver: "Caller"
+    role: "Return address"
+  - index: 2
+    name: "x2"
+    abi_name: "sp"
+    saver: "Callee"
+    role: "Stack pointer (16-byte aligned, grows downward)"
+  - index: 3
+    name: "x3"
+    abi_name: "gp"
+    saver: "None"
+    role: "Global pointer (reserved, points to small-data area)"
+  - index: 4
+    name: "x4"
+    abi_name: "tp"
+    saver: "None"
+    role: "Thread pointer (reserved, points to Thread-Local Storage)"
+  - index: 5
+    name: "x5"
+    abi_name: "t0"
+    saver: "Caller"
+    role: "Temporary / Alternate Link Register"
+  - index: 6
+    name: "x6"
+    abi_name: "t1"
+    saver: "Caller"
+    role: "Temporary register 1"
+  - index: 7
+    name: "x7"
+    abi_name: "t2"
+    saver: "Caller"
+    role: "Temporary register 2"
+  - index: 8
+    name: "x8"
+    abi_name: "s0"
+    alt_abi_name: "fp"
+    saver: "Callee"
+    role: "Saved register 0 / Frame pointer"
+  - index: 9
+    name: "x9"
+    abi_name: "s1"
+    saver: "Callee"
+    role: "Saved register 1"
+  - index: 10
+    name: "x10"
+    abi_name: "a0"
+    saver: "Caller"
+    role: "Function Argument 0 / Primary Return Value"
+  - index: 11
+    name: "x11"
+    abi_name: "a1"
+    saver: "Caller"
+    role: "Function Argument 1 / Secondary Return Value (upper 32-bits of 64-bit)"
+  - index: 12
+    name: "x12"
+    abi_name: "a2"
+    saver: "Caller"
+    role: "Function Argument 2"
+  - index: 13
+    name: "x13"
+    abi_name: "a3"
+    saver: "Caller"
+    role: "Function Argument 3"
+  - index: 14
+    name: "x14"
+    abi_name: "a4"
+    saver: "Caller"
+    role: "Function Argument 4"
+  - index: 15
+    name: "x15"
+    abi_name: "a5"
+    saver: "Caller"
+    role: "Function Argument 5"
+  - index: 16
+    name: "x16"
+    abi_name: "a6"
+    saver: "Caller"
+    role: "Function Argument 6"
+  - index: 17
+    name: "x17"
+    abi_name: "a7"
+    saver: "Caller"
+    role: "Function Argument 7 / Syscall Number"
+  - index: 18
+    name: "x18"
+    abi_name: "s2"
+    saver: "Callee"
+    role: "Saved register 2"
+  - index: 19
+    name: "x19"
+    abi_name: "s3"
+    saver: "Callee"
+    role: "Saved register 3"
+  - index: 20
+    name: "x20"
+    abi_name: "s4"
+    saver: "Callee"
+    role: "Saved register 4"
+  - index: 21
+    name: "x21"
+    abi_name: "s5"
+    saver: "Callee"
+    role: "Saved register 5"
+  - index: 22
+    name: "x22"
+    abi_name: "s6"
+    saver: "Callee"
+    role: "Saved register 6"
+  - index: 23
+    name: "x23"
+    abi_name: "s7"
+    saver: "Callee"
+    role: "Saved register 7"
+  - index: 24
+    name: "x24"
+    abi_name: "s8"
+    saver: "Callee"
+    role: "Saved register 8"
+  - index: 25
+    name: "x25"
+    abi_name: "s9"
+    saver: "Callee"
+    role: "Saved register 9"
+  - index: 26
+    name: "x26"
+    abi_name: "s10"
+    saver: "Callee"
+    role: "Saved register 10"
+  - index: 27
+    name: "x27"
+    abi_name: "s11"
+    saver: "Callee"
+    role: "Saved register 11"
+  - index: 28
+    name: "x28"
+    abi_name: "t3"
+    saver: "Caller"
+    role: "Temporary register 3"
+  - index: 29
+    name: "x29"
+    abi_name: "t4"
+    saver: "Caller"
+    role: "Temporary register 4"
+  - index: 30
+    name: "x30"
+    abi_name: "t5"
+    saver: "Caller"
+    role: "Temporary register 5"
+  - index: 31
+    name: "x31"
+    abi_name: "t6"
+    saver: "Caller"
+    role: "Temporary register 6"
+
+calling_conventions:
+  argument_passing:
+    scalar_arguments: "First 8 scalar arguments (up to 32 bits each) passed in a0–a7. 64-bit arguments passed in aligned even-odd register pair (e.g. a0:a1, a2:a3). Additional arguments passed on stack."
+    struct_arguments: "Small structures (<= 8 bytes) passed in up to 2 argument registers. Larger structures passed by reference."
+  return_values:
+    scalar_32bit: "Returned in a0."
+    scalar_64bit: "Returned in a0 (lower 32 bits) and a1 (upper 32 bits)."
+    structures: "Structures <= 8 bytes returned in a0 (and a1 if > 4 bytes). Larger structures written into caller-allocated buffer passed as implicit first argument in a0."
+  stack_frame_layout:
+    growth_direction: "Downwards (High address to Low address)"
+    alignment: "16-byte boundary maintained across all function call boundaries"
+    frame_pointer_usage: "s0 (x8) optionally holds the frame pointer; when used, points to the top of the stack frame before local allocations."

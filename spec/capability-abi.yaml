@@ -1,0 +1,96 @@
+# AI-Native Computer System: CapabilityLite ABI Specification v1.0
+# Calling Convention and Register Roles for 8 x 100-bit Capability Registers (c0–c7)
+
+capability_model:
+  register_count: 8
+  metadata_width_bits: 100
+  fields:
+    tag: { width: 1, description: "1 = Valid, 0 = Invalid/NULL" }
+    base: { width: 32, description: "32-bit spatial base address" }
+    length: { width: 32, description: "32-bit bounded buffer length in bytes" }
+    perms: { width: 3, description: "Bit 0: Read (1), Bit 1: Write (2), Bit 2: Exec (4)" }
+    offset: { width: 32, description: "32-bit current cursor offset from base" }
+
+registers:
+  - index: 0
+    name: "c0"
+    abi_name: "cnull"
+    type: "HARDWARE_IMMUTABLE"
+    saver: "None"
+    tag: 0
+    base: "0x00000000"
+    length: "0x00000000"
+    perms: 0 # None
+    role: "Hardwired NULL Capability (tag=0). Writing to c0 is silently discarded by hardware."
+
+  - index: 1
+    name: "c1"
+    abi_name: "cram"
+    type: "HARDWARE_IMMUTABLE"
+    saver: "None"
+    tag: 1
+    base: "0x00000000"
+    length: "0x00001000"
+    perms: 3 # Read + Write
+    role: "Global RAM Root Capability. Grants root authority over data memory. Writing to c1 is silently discarded by hardware."
+
+  - index: 2
+    name: "c2"
+    abi_name: "cmmio"
+    type: "HARDWARE_IMMUTABLE"
+    saver: "None"
+    tag: 1
+    base: "0x80000000"
+    length: "0x00010000"
+    perms: 3 # Read + Write
+    role: "Global MMIO Root Capability. Grants root authority over hardware telemetry, scheduler, and trap registers. Writing to c2 is silently discarded by hardware."
+
+  - index: 3
+    name: "c3"
+    abi_name: "ca0"
+    type: "PROCESS_WRITABLE"
+    saver: "Caller"
+    role: "Capability Function Argument 0 / Primary Return Capability / Active Process Data Region"
+
+  - index: 4
+    name: "c4"
+    abi_name: "ca1"
+    type: "PROCESS_WRITABLE"
+    saver: "Caller"
+    role: "Capability Function Argument 1 / Secondary Return Capability / Active Process Heap Region"
+
+  - index: 5
+    name: "c5"
+    abi_name: "ct0"
+    type: "PROCESS_WRITABLE"
+    saver: "Caller"
+    role: "Capability Temporary 0 / Stack Scratch Buffer Capability"
+
+  - index: 6
+    name: "c6"
+    abi_name: "cs0"
+    type: "PROCESS_WRITABLE"
+    saver: "Callee"
+    role: "Capability Saved Register 0 (Preserved across function calls)"
+
+  - index: 7
+    name: "c7"
+    abi_name: "cs1"
+    type: "PROCESS_WRITABLE"
+    saver: "Callee"
+    role: "Capability Saved Register 1 (Preserved across function calls)"
+
+conventions:
+  function_calls:
+    argument_passing: "Capability arguments passed in ca0 (c3) and ca1 (c4)."
+    return_values: "Capability returned in ca0 (c3)."
+    caller_saved: "ca0 (c3), ca1 (c4), ct0 (c5) must be saved by the caller if live across calls."
+    callee_saved: "cs0 (c6), cs1 (c7) must be preserved and restored by any callee modifying them."
+
+  context_switching:
+    task_state_size: "5 x 100-bit registers (c3–c7) saved in process control block (PCB)."
+    memory_representation: "Each 100-bit capability stored as 16 bytes: [offset:4B][base:4B][length:4B][perms:1B + tag:1B + pad:2B]."
+    total_cap_context_bytes: 80 # 5 * 16 bytes
+
+  trap_handling:
+    preservation: "Hardware freezes execution on precise trap. OS trap handler preserves active process capabilities in PCB before handling or modifying c3–c7."
