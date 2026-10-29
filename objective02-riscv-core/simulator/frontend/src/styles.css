@@ -36,6 +36,52 @@
   padding: 0;
 }
 
+.boot-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.boot-card {
+  width: min(440px, 100%);
+  padding: 32px;
+  text-align: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-card);
+}
+
+.boot-card h1 {
+  margin-bottom: 10px;
+  font-size: 22px;
+}
+
+.boot-card p {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.boot-spinner {
+  width: 28px;
+  height: 28px;
+  margin: 0 auto 18px;
+  border: 3px solid rgba(0, 245, 212, 0.2);
+  border-top-color: var(--accent-cyan);
+  border-radius: 50%;
+  animation: boot-spin 0.8s linear infinite;
+}
+
+.boot-error { border-color: rgba(239, 68, 68, 0.45); }
+.boot-error h1 { color: var(--accent-red); }
+
+@keyframes boot-spin { to { transform: rotate(360deg); } }
+
 body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
