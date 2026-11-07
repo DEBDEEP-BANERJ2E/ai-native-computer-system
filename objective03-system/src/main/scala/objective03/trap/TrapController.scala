@@ -68,7 +68,8 @@ class TrapController extends Module {
   // mie: bit7=MTIE, bit3=MSIE
   // sip: bit5=STIP (timer delegated), bit1=SSIP
   // sie: bit5=STIE, bit1=SSIE
-  val mipEff = io.mip | Cat(0.U(25.W), io.mtipExt, 0.U(6.W)) // set MTIP bit7
+  // MTIP is mip bit 7: Cat(msb..lsb) -> 24 zeros | mtipExt(bit7) | 7 zeros
+  val mipEff = io.mip | Cat(0.U(24.W), io.mtipExt, 0.U(7.W))
   // STIP is NOT driven by mtimecmp: M-mode handler sets it via sip write.
   val sipEff = io.sip
 

@@ -45,28 +45,56 @@ class SystemCoreEpcSpec extends AnyFlatSpec with ChiselScalatestTester {
     writes.toSeq
   }
 
+  // Preload `size` slots with jal0 (safe spin), then apply (idx->instr) updates
+  // in the given order while capturing commits to `rd`. Returns captured writes.
+  def loadSelective(dut: SystemCore, size: Int, updates: Seq[(Int, BigInt)],
+                    rd: Int, extraCycles: Int): Seq[BigInt] = {
+    val writes = scala.collection.mutable.ArrayBuffer[BigInt]()
+    def cap(): Unit = {
+      if (dut.io.commit.valid.peek().litValue == 1 &&
+          dut.io.commit.regWrite.peek().litValue == 1 &&
+          dut.io.commit.rd.peek().litValue == rd)
+        writes += dut.io.commit.writeData.peek().litValue
+    }
+    def poke(i: Int, w: BigInt): Unit = {
+      dut.io.imemLoadAddr.poke((i * 4).U); dut.io.imemLoadData.poke(w.U)
+      dut.io.imemLoadEn.poke(true.B); dut.clock.step(1); cap()
+    }
+    (0 until size).foreach(i => poke(i, jal0))          // safe spin everywhere
+    updates.foreach { case (i, w) => poke(i, w) }        // handler first, then body
+    dut.io.imemLoadEn.poke(false.B)
+    dut.io.imemLoadAddr.poke(0.U); dut.io.imemLoadData.poke(0.U)
+    var k = 0
+    while (k < extraCycles) { dut.clock.step(1); cap(); k += 1 }
+    writes.toSeq
+  }
+
   behavior of "SystemCore interrupt EPC precision"
 
-  ignore should "save xepc = next unretired instruction at WB boundary" in {
+  it should "save xepc = next unretired instruction at WB boundary" in {
     test(new SystemCore(imemDepthWords = 128, dmemSizeBytes = 4096)) { dut =>
       // mtvec=0x80 direct; handler@0x80: csrrs x5,mepc ; csrrs x6,mcause ; jal0
       // Body: nop x4 (pc0..12); inject STIP via mip write @pc16; then nop x4 @20..
       // Interrupt fires at a WB boundary; mepc must equal the pc of the first
       // instruction that had NOT retired = some pc in [20..36] depending on timing.
       // We verify mepc is 4-aligned, >=20, <=36, and equals an instruction boundary.
-      val p = Seq(
-        li(6, 0x80), csrW(0x305, 6, 0),   // mtvec=0x80 (@0,@4)
-        li(6, 0x20), csrW(0x304, 6, 0),   // mie.STIE (@8,@12)
-        li(6, 0x08), csrW(0x300, 6, 0),   // mstatus.MIE (@16,@20)
-        csrW(0x344, 6, 0),                // mip.STIP=1 (@24) -> pending now
-        nop, nop, nop, nop,               // @28..40 younger instrs
-        nop, nop, nop
-      ) ++ Seq.fill(32 - 13)(nop) ++       // pad to idx32=pc128? need 0x80=idx32
-      Seq(csrR(0x341, 0, 5), csrR(0x342, 0, 6), jal0) ++ Seq.fill(8)(nop)
-      val writes = simulate(dut, p, 5, 120)
-      // mepc must be a valid instruction boundary >= 28 (post-inject), 4-aligned
-      val v = writes.lastOption.map(_.toLong).getOrElse(-1L)
-      assert(v >= 28 && v <= 44 && (v % 4) == 0)
+      // Preload jal0 (safe spin, no illegal during load). Load handler region
+      // FIRST so it is resident before any trap, then body.
+      val body = Seq(
+        li(6, 0x80), csrW(0x305, 6, 0),   // mtvec=0x80
+        li(6, 0x80), csrW(0x304, 6, 0),   // mie.MTIE (bit7) -- MTIP already pending (mtimecmp=0)
+        li(6, 0x08), csrW(0x300, 6, 0),   // mstatus.MIE
+        nop, nop, nop, nop, nop, nop, nop, nop, nop, nop
+      )
+      // ALSO capture mcause->x6 is rd6; we watch rd5=mepc. For cause check use rd5 too? keep mepc.
+      val updates = Seq(
+        (32, csrR(0x341, 0, 5)),  // handler @0x80: mepc->x5
+        (33, csrR(0x342, 0, 6)),  // mcause->x6
+        (34, jal0), (35, jal0)
+      ) ++ body.zipWithIndex.map { case (w,i) => (i, w) }
+      val writesMepc = loadSelective(dut, 64, updates, 5, 150)
+      val v = writesMepc.lastOption.map(_.toLong).getOrElse(-1L)
+      assert(v >= 28 && v <= 56 && (v % 4) == 0)
     }
   }
 
@@ -103,15 +131,17 @@ class SystemCoreEpcSpec extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-  ignore should "direct mtvec sends every trap to BASE" in {
+  it should "direct mtvec sends every trap to BASE" in {
     test(new SystemCore(imemDepthWords = 128, dmemSizeBytes = 4096)) { dut =>
       // mtvec=0x80 mode=00 direct; ecall -> target 0x80 regardless of cause
-      val p = Seq(
-        li(6, 0x80), csrW(0x305, 6, 0),  // mtvec direct
-        nop, ecallInstr, nop, nop
-      ) ++ Seq.fill(32 - 6)(nop) ++
-      Seq(csrR(0x342, 0, 5), jal0) ++ Seq.fill(8)(nop)
-      val writes = simulate(dut, p, 5, 60)
+      val updates = Seq(
+        (32, csrR(0x342, 0, 5)),  // handler @0x80: mcause->x5
+        (33, jal0), (34, jal0)
+      ) ++ Seq(
+        (0, li(6, 0x80)), (1, csrW(0x305, 6, 0)), (2, nop),
+        (3, ecallInstr), (4, nop), (5, nop)
+      )
+      val writes = loadSelective(dut, 64, updates, 5, 80)
       assert(writes.contains(BigInt(TrapCause.ECALL_M)))
     }
   }
