@@ -116,18 +116,18 @@ class TrapController extends Module {
 
   // Delegation: exception delegated to S iff medeleg[cause]=1 AND priv < M
   val excDelegated = excValid && io.privLevel =/= Privilege.M.U(2.W) &&
-    io.medeleg(exc.cause(4, 0)) // medeleg bits indexed by cause[4:0] for low causes
+    (io.medeleg & (1.U(32.W) << exc.cause(3, 0))) =/= 0.U // delegated bit for this cause
 
   // Interrupt delegation: mideleg[irq]=1 AND priv < M
   val intrDelegated = intrValid && io.privLevel =/= Privilege.M.U(2.W) &&
-    io.mideleg(selectedIntrCause(4, 0))
+    (io.mideleg & (1.U(32.W) << selectedIntrCause(3, 0))) =/= 0.U
 
   // Trap destination: delegated -> S, else M
   val toSupervisor = excDelegated || intrDelegated
 
   // Trap cause value: interrupt gets MSB set; exception keeps code
   val finalCause = Mux(intrValid && !excValid,
-    selectedIntrCause | TrapCause.INTERRUPT_BIT.U,
+    selectedIntrCause | "h80000000".U,
     exc.cause)
 
   // ---- Outputs ----
