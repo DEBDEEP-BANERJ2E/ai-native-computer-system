@@ -41,17 +41,22 @@ export const App: React.FC = () => {
   const [scenarios, setScenarios] = useState<ScenarioItem[]>([]);
   const [currentScenarioId, setCurrentScenarioId] = useState<string>("canon_prog1_alu");
   const [state, setState] = useState<SimulationState | null>(null);
+  const [booting, setBooting] = useState(true);
+  const [bootError, setBootError] = useState<string | null>(null);
 
   // Initialize Scenarios and State
   useEffect(() => {
-    fetchScenarios()
-      .then((data) => {
+    Promise.all([fetchScenarios(), fetchState()])
+      .then(([data, initialState]) => {
         setScenarios(data.scenarios);
-        if (data.scenarios.length > 0) {
-          handleSelectScenario(data.scenarios[0].id);
-        }
+        setState(initialState);
+        setCurrentScenarioId(initialState.scenario_id || data.scenarios[0]?.id || "canon_prog1_alu");
       })
-      .catch(console.error);
+      .catch((error) => {
+        console.error(error);
+        setBootError(error instanceof Error ? error.message : "Unable to connect to the simulator backend");
+      })
+      .finally(() => setBooting(false));
   }, []);
 
   const handleSelectScenario = async (id: string) => {
@@ -113,6 +118,30 @@ export const App: React.FC = () => {
       console.error(e);
     }
   };
+
+  if (booting) {
+    return (
+      <div className="boot-screen">
+        <div className="boot-card">
+          <div className="boot-spinner" />
+          <h1>Starting RVSecure Workbench</h1>
+          <p>Connecting to the RTL / Python simulation backend...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (bootError) {
+    return (
+      <div className="boot-screen">
+        <div className="boot-card boot-error">
+          <h1>Simulator backend unavailable</h1>
+          <p>{bootError}</p>
+          <button className="btn btn-primary" onClick={() => window.location.reload()}>Retry connection</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app-container">
