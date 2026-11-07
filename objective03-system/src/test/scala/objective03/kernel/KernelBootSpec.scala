@@ -86,4 +86,57 @@ class KernelBootSpec extends AnyFlatSpec with ChiselScalatestTester {
       assert(dut.io.privLevel.peek().litValue==Privilege.M)
     }
   }
+
+  it should "M->S->U->S->U syscall round-trip: scause=8 sepc+=4 resume in U" in {
+    test(new SystemCore(imemDepthWords=128,dmemSizeBytes=4096)){dut=>
+      // Layout (idx=pc/4):
+      //   0x000 M boot : mtvec=0x100 stvec=0x140 medeleg[8]=1 mepc=0x40 MPP=S mret
+      //   0x040 S boot : sepc=0x80 ; sret -> U
+      //   0x080 U prog : li x5,0xAA ; ecall ; li x5,0xBB ; jal0
+      //   0x100 M hdlr : (safety) csrrs x9,mcause ; jal0   [should NOT run]
+      //   0x140 S hdlr : scause->x20 sepc->x21 sepc->x22 x22+=4 sepc=x22 sret
+      val MHandler = Seq((64,csrR(0x342,0,9)),(65,jal0),(66,jal0))
+      val SHandler = Seq(
+        (80,csrR(0x142,0,20)),   // scause -> x20  (expect 8)
+        (81,csrR(0x141,0,21)),   // sepc   -> x21  (expect 0x84 = U ecall pc)
+        (82,csrR(0x141,0,22)),   // sepc   -> x22  (for modify)
+        (83,nop),(84,nop),(85,nop),  // gap: let x22 reach regfile (CSR fwd gap)
+        (86,addi(22,22,4)),      // x22 = sepc+4
+        (87,csrW(0x141,22,0)),   // sepc = x22
+        (88,sret),               // -> U @ sepc
+        (89,jal0)
+      )
+      val UProg = Seq(
+        (32,li(5,0xAA)),         // marker before ecall
+        (33,ecall),              // U ecall @0x84 -> delegated to S
+        (34,li(5,0xBB)),         // resume proof @0x88
+        (35,jal0)
+      )
+      val SBoot = Seq(
+        (16,li(6,0x80)),         // sepc = 0x80
+        (17,csrW(0x141,6,0)),
+        (18,sret)                // -> U @0x80
+      )
+      // M boot @idx0..11
+      val boot = Seq(
+        li(6,0x100), csrW(0x305,6,0),   // mtvec=0x100
+        li(6,0x140), csrW(0x105,6,0),   // stvec=0x140
+        li(6,0x100), csrW(0x302,6,0),   // medeleg=0x100 (bit8 ECALL_U -> S)
+        li(6,0x40),  csrW(0x341,6,0),   // mepc=0x40 (S entry)
+      ) ++ li32(6,0x800) ++ Seq(csrW(0x300,6,0), mret)  // mstatus.MPP=S ; mret
+      // Load order: M handler, S handler, U prog, S boot, M boot LAST.
+      val updates = MHandler ++ SHandler ++ UProg ++ SBoot ++ boot.zipWithIndex.map{case(w,i)=>(i,w)}
+      loadOrdered(dut,96,updates)
+      val cs=captureCommits(dut,400)
+      // scause=8 (ECALL_U) captured by S handler
+      assert(rdWrites(cs,20).contains(BigInt(8)))
+      // sepc captured = 0x84 (the U ecall instruction pc)
+      val sepcCap=rdWrites(cs,21).lastOption.map(_.toLong&0xffffffffL).getOrElse(-1L)
+      assert(sepcCap==0x84)
+      // U resumed: x5=0xBB written AFTER ecall proves return to U-mode
+      assert(rdWrites(cs,5).contains(BigInt(0xBB)))
+      // final privilege is U (returned through S)
+      assert(dut.io.privLevel.peek().litValue==Privilege.U)
+    }
+  }
 }
