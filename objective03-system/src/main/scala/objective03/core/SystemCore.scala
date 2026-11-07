@@ -567,17 +567,27 @@ class SystemCore(
   // already committed or MRET/SRET would observe stale privilege state.
   // (sysWb is declared in the WB section below; forward-declared here.)
 
+  // Younger-instruction side-effect suppression: when ANY WB-boundary
+  // architectural event is taken (precise trap, sys trap/interrupt, or
+  // MRET/SRET return), the MEM-stage (younger) instruction must not commit
+  // memory/MMIO/timer writes. takeSysReturn is computed later; detect it
+  // here from the WB sideband so the write enables can be gated.
+  val sysWbEarly = sysMemWb.io.out
+  val wbIsReturnEarly = memWbReg.io.out.valid && sysWbEarly.valid &&
+                        (sysWbEarly.isMret || sysWbEarly.isSret)
+  val wbMemWriteBlock = takePreciseTrap || takeSysTrap || wbIsReturnEarly
+
   // ---- MMIO: SystemMMIO + TimerBlock share 0x8000xxxx ----
   systemMMIO.io.address     := exMemReg.io.out.aluResult
   val timerHit = timer.io.windowHit
   systemMMIO.io.memReadReq  := memValid && exMemReg.io.out.memRead && capAccessAllow && !timerHit
-  systemMMIO.io.memWriteReq := memValid && exMemReg.io.out.memWrite && capAccessAllow && !timerHit
+  systemMMIO.io.memWriteReq := memValid && exMemReg.io.out.memWrite && capAccessAllow && !timerHit && !wbMemWriteBlock
   systemMMIO.io.writeData   := exMemReg.io.out.rs2Data
   systemMMIO.io.memWidth    := exMemReg.io.out.memWidth
 
   timer.io.address     := exMemReg.io.out.aluResult
   timer.io.memReadReq  := memValid && exMemReg.io.out.memRead && capAccessAllow && timerHit
-  timer.io.memWriteReq := memValid && exMemReg.io.out.memWrite && capAccessAllow && timerHit
+  timer.io.memWriteReq := memValid && exMemReg.io.out.memWrite && capAccessAllow && timerHit && !wbMemWriteBlock
   timer.io.writeData   := exMemReg.io.out.rs2Data
   timer.io.memWidth    := exMemReg.io.out.memWidth
   io.timerMtip        := timer.io.mtip
@@ -587,7 +597,7 @@ class SystemCore(
   dmem.io.address   := exMemReg.io.out.aluResult
   dmem.io.writeData := exMemReg.io.out.rs2Data
   dmem.io.memRead   := memValid && exMemReg.io.out.memRead && capAccessAllow && !anyMmioHit
-  dmem.io.memWrite  := memValid && exMemReg.io.out.memWrite && capAccessAllow && !anyMmioHit
+  dmem.io.memWrite  := memValid && exMemReg.io.out.memWrite && capAccessAllow && !anyMmioHit && !wbMemWriteBlock
   dmem.io.memWidth  := exMemReg.io.out.memWidth
 
   val memReadData = Mux(timerHit, timer.io.readData,

@@ -73,43 +73,53 @@ class TrapController extends Module {
   // STIP is NOT driven by mtimecmp: M-mode handler sets it via sip write.
   val sipEff = io.sip
 
-  val mTimerPending = mipEff(TrapCause.MTIP) && io.mie(TrapCause.MTIP)
-  val sTimerPending = sipEff(TrapCause.STIP) && io.sie(TrapCause.STIP)
-  val mSwPending    = mipEff(TrapCause.MSIP) && io.mie(TrapCause.MSIP)
-  val sSwPending    = sipEff(TrapCause.SSIP) && io.sie(TrapCause.SSIP)
+  // Pending+enabled per IRQ (unified machine view): mipEff & mie.
+  // Delegation (mideleg) selects the TARGET privilege, not mere redirection:
+  //   target = S iff mideleg[irq]=1, else M.
+  // Takeable iff (priv < target)  -- higher-priv interrupt preempts lower
+  //              OR (priv == target && globalIE(priv)).
+  // In M, an S-target interrupt is never taken (cannot trap M->S).
+  val isM = io.privLevel === Privilege.M.U(2.W)
+  val isS = io.privLevel === Privilege.S.U(2.W)
+  val isU = io.privLevel === Privilege.U.U(2.W)
+  // globalIE for the CURRENT privilege (U has no implemented UIE -> 0)
+  val curGlobalIE = Mux(isM, io.mstatusMIE, Mux(isS, io.sstatusSIE, false.B))
 
-  // Pending visible at current privilege:
-  //   M-mode sees mip&mie; S/U see sip&sie (only delegated bits)
-  val pendingForCurrent = Mux(io.privLevel === Privilege.M.U(2.W),
-    (mipEff & io.mie) =/= 0.U,
-    (sipEff & io.sie) =/= 0.U)
+  def irqPend(bit: Int) = mipEff(bit) && io.mie(bit)
+  def irqDeleg(bit: Int) = (io.mideleg & (1.U(32.W) << bit)) =/= 0.U
 
-  io.anyInterruptPending := pendingForCurrent
+  // Each candidate: (irqBit, causeCode). Priority high->low.
+  val cands = Seq(
+    (TrapCause.MEIP, TrapCause.MEIP), (TrapCause.MSIP, TrapCause.MSIP),
+    (TrapCause.MTIP, TrapCause.MTIP), (TrapCause.SEIP, TrapCause.SEIP),
+    (TrapCause.SSIP, TrapCause.SSIP), (TrapCause.STIP, TrapCause.STIP))
 
-  // ---- Global interrupt enable ----
-  val globalIE = Mux(io.privLevel === Privilege.M.U(2.W), io.mstatusMIE, io.sstatusSIE)
+  // takeable_i and targetPriv_i per candidate; select highest-priority takeable.
+  var bestCause = 0.U(32.W)
+  var bestTarget = Privilege.M.U(2.W)
+  var anyTake = false.B
+  cands.foreach { case (bit, cause) =>
+    val pend = irqPend(bit)
+    val deleg = irqDeleg(bit)
+    val target = Mux(deleg, Privilege.S.U(2.W), Privilege.M.U(2.W))
+    val privNum = io.privLevel
+    val tgtNum  = target
+    val belowTarget = privNum < tgtNum          // U(0)<S(1)<M(3)
+    val atTargetIE  = (privNum === tgtNum) && curGlobalIE
+    val takeable = pend && io.intrQualify && (belowTarget || atTargetIE)
+    // higher priority wins: update only if nothing taken yet at higher prio
+    when(takeable && !anyTake) {
+      bestCause  := cause.U(32.W)
+      bestTarget := target
+      anyTake    := true.B
+    }
+  }
 
-  // ---- Interrupt cause selection (highest priority first: MEI>MSI>MTI>SEI>SSI>STI) ----
-  val intrCause = Wire(UInt(32.W))
-  intrCause := 0.U
-  val hasMExI = mipEff(TrapCause.MEIP) && io.mie(TrapCause.MEIP)
-  val hasMSI  = mSwPending
-  val hasMTI  = mTimerPending
-  val hasSEI  = sipEff(TrapCause.SEIP) && io.sie(TrapCause.SEIP)
-  val hasSSI  = sSwPending
-  val hasSTI  = sTimerPending
+  io.anyInterruptPending := (mipEff & io.mie) =/= 0.U
 
-  // Priority mux (arbitrary but fixed order)
-  val mIntrSel = Mux(hasMExI, TrapCause.MEIP.U, Mux(hasMSI, TrapCause.MSIP.U, TrapCause.MTIP.U))
-  val hasAnyMIntr = hasMExI || hasMSI || hasMTI
-  val sIntrSel = Mux(hasSEI, TrapCause.SEIP.U, Mux(hasSSI, TrapCause.SSIP.U, TrapCause.STIP.U))
-  val hasAnySIntr = hasSEI || hasSSI || hasSTI
-
-  val intrValid = globalIE && pendingForCurrent && io.intrQualify &&
-    Mux(io.privLevel === Privilege.M.U(2.W), hasAnyMIntr, hasAnySIntr)
-
-  val selectedIntrCause = Mux(io.privLevel === Privilege.M.U(2.W),
-    mIntrSel, sIntrSel)
+  val intrValid = anyTake
+  val selectedIntrCause = bestCause
+  val intrTargetPriv = bestTarget
 
   // ---- Exception path (synchronous, from pipeline) ----
   val exc = io.trapEvent
@@ -119,12 +129,10 @@ class TrapController extends Module {
   val excDelegated = excValid && io.privLevel =/= Privilege.M.U(2.W) &&
     (io.medeleg & (1.U(32.W) << exc.cause(3, 0))) =/= 0.U // delegated bit for this cause
 
-  // Interrupt delegation: mideleg[irq]=1 AND priv < M
-  val intrDelegated = intrValid && io.privLevel =/= Privilege.M.U(2.W) &&
-    (io.mideleg & (1.U(32.W) << selectedIntrCause(3, 0))) =/= 0.U
-
-  // Trap destination: delegated -> S, else M
-  val toSupervisor = excDelegated || intrDelegated
+  // Interrupt target privilege was resolved during candidate selection
+  // (mideleg -> S else M). Exceptions delegate via medeleg when priv < M.
+  val intrToS = intrValid && intrTargetPriv === Privilege.S.U(2.W)
+  val toSupervisor = excDelegated || intrToS
 
   // Trap cause value: interrupt gets MSB set; exception keeps code
   val finalCause = Mux(intrValid && !excValid,

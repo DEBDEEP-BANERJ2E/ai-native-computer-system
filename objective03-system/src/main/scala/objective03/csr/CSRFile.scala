@@ -97,7 +97,8 @@ class CSRFile extends Module {
 
   // ---- Supervisor alias masks ----
   // sstatus view of mstatus: SIE(1), SPIE(5), SPP(8), SUM(18), MXR(19), SD(31)
-  val SSTATUS_ALIAS_MASK = "h800C0322".U // bits 31,19,18,8,5,1
+  val SSTATUS_ALIAS_MASK = "h800C0322".U // bits 31,19,18,8,5,1 (read view)
+  val SSTATUS_WMASK      = "h000C0322".U // writable subset: SD(31) is RO
   // sie view of mie: SSIE(1), STIE(5), SEIE(9)
   val SIE_ALIAS_MASK     = "h00000222".U // bits 9,5,1
   // sip view of mip: SSIP(1), STIP(5), SEIP(9)
@@ -184,7 +185,7 @@ class CSRFile extends Module {
   when(io.writeEn && !io.illegal && isWrite) {
     // Supervisor aliases write through to machine state
     when(io.csrAddr === CSR.SSTATUS.U) {
-      mstatus := aliasWrite(mstatus, SSTATUS_ALIAS_MASK, io.rs1Data, io.accessType)
+      mstatus := aliasWrite(mstatus, SSTATUS_WMASK, io.rs1Data, io.accessType)
     }
     when(io.csrAddr === CSR.SIE.U) {
       mie := aliasWrite(mie, SIE_ALIAS_MASK, io.rs1Data, io.accessType)
@@ -194,7 +195,7 @@ class CSRFile extends Module {
     }
     // Dedicated supervisor regs
     switch(io.csrAddr) {
-      is(CSR.STVEC.U)      { stvec      := io.rs1Data & "hFFFFFFFC".U }
+      is(CSR.STVEC.U)      { stvec      := io.rs1Data }
       is(CSR.SCOUNTEREN.U) { scounteren := applyW(scounteren, io.accessType) }
       is(CSR.SSCRATCH.U)   { sscratch   := applyW(sscratch,   io.accessType) }
       is(CSR.SEPC.U)       { sepc       := io.rs1Data & "hFFFFFFFC".U }
@@ -206,7 +207,7 @@ class CSRFile extends Module {
       is(CSR.MEDELEG.U)    { medeleg    := applyW(medeleg,    io.accessType) }
       is(CSR.MIDELEG.U)    { mideleg    := applyW(mideleg,    io.accessType) }
       is(CSR.MIE.U)        { mie        := applyW(mie,        io.accessType) }
-      is(CSR.MTVEC.U)      { mtvec      := io.rs1Data & "hFFFFFFFC".U }
+      is(CSR.MTVEC.U)      { mtvec      := io.rs1Data }
       is(CSR.MCOUNTEREN.U) { mcounteren := applyW(mcounteren, io.accessType) }
       is(CSR.MSCRATCH.U)   { mscratch   := applyW(mscratch,   io.accessType) }
       is(CSR.MEPC.U)       { mepc       := io.rs1Data & "hFFFFFFFC".U }

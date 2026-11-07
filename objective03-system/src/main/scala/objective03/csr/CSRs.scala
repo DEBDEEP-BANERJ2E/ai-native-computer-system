@@ -50,7 +50,7 @@ object SstatusBits {
   val UIE  = 0  // User global interrupt enable
   val SIE  = 1  // Supervisor global interrupt enable
   val UPIE = 2  // Previous UIE
-  val SPIE = 3  // Previous SIE (saved on trap entry, restored on SRET)
+  val SPIE = 5  // Previous SIE (mstatus bit5; saved on trap entry, restored on SRET)
   val SPP  = 8  // Previous privilege mode (0=U, 1=S)
   val FS_LSB = 13 // [14:13] floating-point status (reserved)
   val XS_LSB = 15 // [16:15] extension status (reserved)
@@ -130,7 +130,8 @@ object Misa {
   val U = 1 << 20
   val XLEN32 = 1 << 30
 
-  val RV32IMSU_VALUE: Int = M | A | I | S | U | XLEN32
+  // RV32IMSU (no A/atomics): M | I | S | U | XLEN32
+  val RV32IMSU_VALUE: Int = M | I | S | U | XLEN32
 }
 
 object TimerMMIO {
