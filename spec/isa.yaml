@@ -755,3 +755,63 @@ future_system_instructions:
     description: "Instruction-Fetch / Instruction-Cache Synchronization Fence"
     cycles: 2
     profile: "AN32-System-v1"
+
+  # ---- CSR register-immediate / register-register system instructions ----
+  # Format SYSTEM_CSR_R : word = csr[31:20] | rs1[19:15] | funct3 | rd | 0x73
+  # Format SYSTEM_CSR_I : word = csr[31:20] | zimm[19:15] | funct3 | rd | 0x73
+  # Operands are destination-first to match the rest of the assembler:
+  #   csrrw rd, csr, rs1  /  csrrwi rd, csr, zimm
+  - mnemonic: "csrrw"
+    format: "SYSTEM_CSR_R"
+    opcode: "0x73"
+    funct3: "0x1"
+    operands: "rd, csr, rs1"
+    constraints: { rd: "0..31", csr: "csr", rs1: "0..31" }
+    description: "CSR Read/Write: rd=old CSR; CSR=rs1"
+    cycles: 2
+    profile: "AN32-System-v1"
+  - mnemonic: "csrrs"
+    format: "SYSTEM_CSR_R"
+    opcode: "0x73"
+    funct3: "0x2"
+    operands: "rd, csr, rs1"
+    constraints: { rd: "0..31", csr: "csr", rs1: "0..31" }
+    description: "CSR Read/Set: rd=old CSR; CSR|=rs1"
+    cycles: 2
+    profile: "AN32-System-v1"
+  - mnemonic: "csrrc"
+    format: "SYSTEM_CSR_R"
+    opcode: "0x73"
+    funct3: "0x3"
+    operands: "rd, csr, rs1"
+    constraints: { rd: "0..31", csr: "csr", rs1: "0..31" }
+    description: "CSR Read/Clear: rd=old CSR; CSR&=~rs1"
+    cycles: 2
+    profile: "AN32-System-v1"
+  - mnemonic: "csrrwi"
+    format: "SYSTEM_CSR_I"
+    opcode: "0x73"
+    funct3: "0x5"
+    operands: "rd, csr, zimm"
+    constraints: { rd: "0..31", csr: "csr", zimm: "0..31" }
+    description: "CSR Read/Write Imm: rd=old CSR; CSR=zimm"
+    cycles: 2
+    profile: "AN32-System-v1"
+  - mnemonic: "csrrsi"
+    format: "SYSTEM_CSR_I"
+    opcode: "0x73"
+    funct3: "0x6"
+    operands: "rd, csr, zimm"
+    constraints: { rd: "0..31", csr: "csr", zimm: "0..31" }
+    description: "CSR Read/Set Imm: rd=old CSR; CSR|=zimm"
+    cycles: 2
+    profile: "AN32-System-v1"
+  - mnemonic: "csrrci"
+    format: "SYSTEM_CSR_I"
+    opcode: "0x73"
+    funct3: "0x7"
+    operands: "rd, csr, zimm"
+    constraints: { rd: "0..31", csr: "csr", zimm: "0..31" }
+    description: "CSR Read/Clear Imm: rd=old CSR; CSR&=~zimm"
+    cycles: 2
+    profile: "AN32-System-v1"
