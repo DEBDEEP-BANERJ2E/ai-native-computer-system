@@ -140,17 +140,19 @@ void Assembler::process_statements(const std::vector<StatementPtr>& stmts, Secti
     PseudoExpander pseudo_exp(diag_);
     ExpressionEvaluator eval(diag_);
     uint32_t group_counter = 0;
+    std::unordered_map<Section*, uint64_t> sec_offsets;
 
     for (const auto& stmt : stmts) {
         Section* cur_sec = sec_table.get_current_section();
         assert(cur_sec != nullptr);
+        uint64_t& cur_offset = sec_offsets[cur_sec];
 
         if (stmt->kind == StatementKind::LABEL) {
             auto l = std::static_pointer_cast<LabelStatement>(stmt);
             if (l->is_local_numeric) {
-                symtab.local_labels().add_def(l->local_label_num, cur_sec->id, cur_sec->data.size(), l->span.start);
+                symtab.local_labels().add_def(l->local_label_num, cur_sec->id, cur_offset, l->span.start);
             } else {
-                symtab.define_symbol(l->name, cur_sec->id, cur_sec->data.size(), l->span);
+                symtab.define_symbol(l->name, cur_sec->id, cur_offset, l->span);
             }
             continue;
         }
@@ -180,6 +182,7 @@ void Assembler::process_statements(const std::vector<StatementPtr>& stmts, Secti
                     std::string sec_name = !d->symbol_arg.empty() ? d->symbol_arg : d->string_args[0];
                     uint32_t flags = SectionFlags::ALLOC;
                     SectionType type = SectionType::PROGBITS;
+                    // Name-based heuristic defaults
                     if (sec_name.rfind(".bss", 0) == 0) {
                         type = SectionType::NOBITS;
                         flags |= SectionFlags::WRITE;
@@ -187,6 +190,20 @@ void Assembler::process_statements(const std::vector<StatementPtr>& stmts, Secti
                         flags |= SectionFlags::EXECINSTR;
                     } else if (sec_name.rfind(".data", 0) == 0) {
                         flags |= SectionFlags::WRITE;
+                    }
+                    // Override with explicit @progbits/@nobits and flag strings from args
+                    for (const auto& sa : d->string_args) {
+                        if (sa == "@progbits") type = SectionType::PROGBITS;
+                        else if (sa == "@nobits") type = SectionType::NOBITS;
+                        // Parse "axw" style flag strings
+                        else if (sa.find('@') == std::string::npos && sa != sec_name) {
+                            flags = SectionFlags::ALLOC; // reset to re-parse
+                            for (char ch : sa) {
+                                if (ch == 'a') flags |= SectionFlags::ALLOC;
+                                else if (ch == 'w') flags |= SectionFlags::WRITE;
+                                else if (ch == 'x') flags |= SectionFlags::EXECINSTR;
+                            }
+                        }
                     }
                     sec_table.set_current_section(sec_table.get_or_create(sec_name, type, flags));
                 }
@@ -240,98 +257,112 @@ void Assembler::process_statements(const std::vector<StatementPtr>& stmts, Secti
             }
 
             // Alignment directives
-            if (d->directive_type == TokenType::DIR_ALIGN || d->directive_type == TokenType::DIR_P2ALIGN) {
-                if (!d->expr_args.empty()) {
-                    auto p2 = eval.evaluate_absolute(d->expr_args[0], &symtab);
-                    if (p2.has_value()) {
-                        uint64_t align_bytes = 1ULL << (*p2);
-                        cur_sec->alignment = std::max(cur_sec->alignment, align_bytes);
-                        cur_sec->add_fragment(std::make_unique<AlignFragment>(align_bytes, std::nullopt, 0, d->span));
+                if (d->directive_type == TokenType::DIR_ALIGN || d->directive_type == TokenType::DIR_P2ALIGN) {
+                    if (!d->expr_args.empty()) {
+                        auto p2 = eval.evaluate_absolute(d->expr_args[0], &symtab);
+                        if (p2.has_value()) {
+                            uint64_t align_bytes = 1ULL << (*p2);
+                            cur_sec->alignment = std::max(cur_sec->alignment, align_bytes);
+                            // Compute padding based on current logical offset
+                            uint64_t pad = (align_bytes - (cur_offset % align_bytes)) % align_bytes;
+                            cur_offset += pad; // advance offset for future symbols
+                            cur_sec->add_fragment(std::make_unique<AlignFragment>(align_bytes, std::nullopt, 0, d->span));
+                        }
                     }
+                    continue;
                 }
-                continue;
-            }
             if (d->directive_type == TokenType::DIR_BALIGN) {
                 if (!d->expr_args.empty()) {
                     auto bytes = eval.evaluate_absolute(d->expr_args[0], &symtab);
                     if (bytes.has_value() && *bytes > 0) {
-                        cur_sec->alignment = std::max(cur_sec->alignment, static_cast<uint64_t>(*bytes));
-                        cur_sec->add_fragment(std::make_unique<AlignFragment>(static_cast<uint64_t>(*bytes), std::nullopt, 0, d->span));
+                        uint64_t balign = static_cast<uint64_t>(*bytes);
+                        cur_sec->alignment = std::max(cur_sec->alignment, balign);
+                        // Compute padding based on current logical offset
+                        uint64_t pad = (balign - (cur_offset % balign)) % balign;
+                        cur_offset += pad;
+                        cur_sec->add_fragment(std::make_unique<AlignFragment>(balign, std::nullopt, 0, d->span));
                     }
                 }
                 continue;
             }
 
             // Space / Zero allocation
-            if (d->directive_type == TokenType::DIR_ZERO || d->directive_type == TokenType::DIR_SPACE) {
-                if (!d->expr_args.empty()) {
-                    auto cnt = eval.evaluate_absolute(d->expr_args[0], &symtab);
-                    if (cnt.has_value() && *cnt >= 0) {
-                        cur_sec->add_fragment(std::make_unique<ZeroFillFragment>(static_cast<uint64_t>(*cnt), d->span));
+                if (d->directive_type == TokenType::DIR_ZERO || d->directive_type == TokenType::DIR_SPACE) {
+                    if (!d->expr_args.empty()) {
+                        auto cnt = eval.evaluate_absolute(d->expr_args[0], &symtab);
+                        if (cnt.has_value() && *cnt >= 0) {
+                            cur_sec->add_fragment(std::make_unique<ZeroFillFragment>(static_cast<uint64_t>(*cnt), d->span));
+                            cur_offset += static_cast<uint64_t>(*cnt); // advance logical offset
+                        }
                     }
+                    continue;
                 }
-                continue;
-            }
 
             // Data emission directives (.byte, .2byte, .4byte, .ascii, .asciz)
-            if (d->directive_type == TokenType::DIR_BYTE) {
-                std::vector<uint8_t> bytes;
-                for (const auto& e : d->expr_args) {
-                    auto val = eval.evaluate_absolute(e, &symtab);
-                    if (val.has_value()) {
-                        bytes.push_back(static_cast<uint8_t>(*val & 0xFF));
-                    } else {
-                        diag_.error(e->span, "unsupported relocatable expression in .byte directive");
+                if (d->directive_type == TokenType::DIR_BYTE) {
+                    std::vector<uint8_t> bytes;
+                    for (const auto& e : d->expr_args) {
+                        auto val = eval.evaluate_absolute(e, &symtab);
+                        if (val.has_value()) {
+                            bytes.push_back(static_cast<uint8_t>(*val & 0xFF));
+                        } else {
+                            diag_.error(e->span, "unsupported relocatable expression in .byte directive");
+                        }
                     }
+                    size_t nbytes = bytes.size();
+                    cur_sec->add_fragment(std::make_unique<DataFragment>(std::move(bytes), d->span));
+                    cur_offset += nbytes;
+                    continue;
                 }
-                cur_sec->add_fragment(std::make_unique<DataFragment>(std::move(bytes), d->span));
-                continue;
-            }
-            if (d->directive_type == TokenType::DIR_2BYTE) {
-                std::vector<uint8_t> bytes;
-                for (const auto& e : d->expr_args) {
-                    auto val = eval.evaluate_absolute(e, &symtab);
-                    if (val.has_value()) {
-                        uint16_t v16 = static_cast<uint16_t>(*val & 0xFFFF);
-                        bytes.push_back(static_cast<uint8_t>(v16 & 0xFF));
-                        bytes.push_back(static_cast<uint8_t>((v16 >> 8) & 0xFF));
-                    } else {
-                        diag_.error(e->span, "unsupported relocatable expression in .2byte / .half directive");
+                if (d->directive_type == TokenType::DIR_2BYTE) {
+                    std::vector<uint8_t> bytes;
+                    for (const auto& e : d->expr_args) {
+                        auto val = eval.evaluate_absolute(e, &symtab);
+                        if (val.has_value()) {
+                            uint16_t v16 = static_cast<uint16_t>(*val & 0xFFFF);
+                            bytes.push_back(static_cast<uint8_t>(v16 & 0xFF));
+                            bytes.push_back(static_cast<uint8_t>((v16 >> 8) & 0xFF));
+                        } else {
+                            diag_.error(e->span, "unsupported relocatable expression in .2byte / .half directive");
+                        }
                     }
+                    size_t nbytes = bytes.size();
+                    cur_sec->add_fragment(std::make_unique<DataFragment>(std::move(bytes), d->span));
+                    cur_offset += nbytes;
+                    continue;
                 }
-                cur_sec->add_fragment(std::make_unique<DataFragment>(std::move(bytes), d->span));
-                continue;
-            }
-            if (d->directive_type == TokenType::DIR_4BYTE) {
-                for (const auto& e : d->expr_args) {
-                    auto res = eval.evaluate(e, &symtab, cur_sec->data.size());
-                    if (res.kind == EvalKind::ABSOLUTE) {
-                        std::vector<uint8_t> bytes(4);
-                        uint32_t v32 = static_cast<uint32_t>(res.value);
-                        bytes[0] = static_cast<uint8_t>(v32 & 0xFF);
-                        bytes[1] = static_cast<uint8_t>((v32 >> 8) & 0xFF);
-                        bytes[2] = static_cast<uint8_t>((v32 >> 16) & 0xFF);
-                        bytes[3] = static_cast<uint8_t>((v32 >> 24) & 0xFF);
-                        cur_sec->add_fragment(std::make_unique<DataFragment>(std::move(bytes), d->span));
-                    } else if (res.kind == EvalKind::RELOCATABLE) {
-                        Fixup f;
-                        f.kind = FixupKind::ABS32;
-                        f.section_id = cur_sec->id;
-                        f.offset = cur_sec->data.size();
-                        f.symbol_name = res.symbol_name;
-                        f.addend = res.value;
-                        f.is_local_numeric = res.is_local_numeric;
-                        f.local_label_num = res.local_label_num;
-                        f.is_forward_ref = res.is_forward_ref;
-                        f.span = e->span;
-                        fixups.push_back(f);
+                if (d->directive_type == TokenType::DIR_4BYTE) {
+                    for (const auto& e : d->expr_args) {
+                        auto res = eval.evaluate(e, &symtab, cur_offset);
+                        if (res.kind == EvalKind::ABSOLUTE) {
+                            std::vector<uint8_t> bytes(4);
+                            uint32_t v32 = static_cast<uint32_t>(res.value);
+                            bytes[0] = static_cast<uint8_t>(v32 & 0xFF);
+                            bytes[1] = static_cast<uint8_t>((v32 >> 8) & 0xFF);
+                            bytes[2] = static_cast<uint8_t>((v32 >> 16) & 0xFF);
+                            bytes[3] = static_cast<uint8_t>((v32 >> 24) & 0xFF);
+                            cur_sec->add_fragment(std::make_unique<DataFragment>(std::move(bytes), d->span));
+                            cur_offset += 4;
+                        } else if (res.kind == EvalKind::RELOCATABLE) {
+                            Fixup f;
+                            f.kind = FixupKind::ABS32;
+                            f.section_id = cur_sec->id;
+                            f.offset = cur_offset;
+                            f.symbol_name = res.symbol_name;
+                            f.addend = res.value;
+                            f.is_local_numeric = res.is_local_numeric;
+                            f.local_label_num = res.local_label_num;
+                            f.is_forward_ref = res.is_forward_ref;
+                            f.span = e->span;
+                            fixups.push_back(f);
 
-                        std::vector<uint8_t> bytes(4, 0);
-                        cur_sec->add_fragment(std::make_unique<DataFragment>(std::move(bytes), d->span));
+                            std::vector<uint8_t> bytes(4, 0);
+                            cur_sec->add_fragment(std::make_unique<DataFragment>(std::move(bytes), d->span));
+                            cur_offset += 4;
+                        }
                     }
+                    continue;
                 }
-                continue;
-            }
             if (d->directive_type == TokenType::DIR_ASCII || d->directive_type == TokenType::DIR_ASCIZ) {
                 std::vector<uint8_t> bytes;
                 for (const auto& s : d->string_args) {
@@ -340,7 +371,9 @@ void Assembler::process_statements(const std::vector<StatementPtr>& stmts, Secti
                         bytes.push_back(0);
                     }
                 }
+                size_t nbytes = bytes.size();
                 cur_sec->add_fragment(std::make_unique<DataFragment>(std::move(bytes), d->span));
+                cur_offset += nbytes;
                 continue;
             }
             if (d->directive_type == TokenType::DIR_EQU || d->directive_type == TokenType::DIR_SET) {
@@ -374,11 +407,11 @@ void Assembler::process_statements(const std::vector<StatementPtr>& stmts, Secti
                     continue;
                 }
 
-                if (cur_sec->is_executable() && (cur_sec->data.size() % 4) != 0) {
+                if (cur_sec->is_executable() && (cur_offset % 4) != 0) {
                     diag_.error(exp_inst.span, "instruction placed on misaligned offset (IALIGN=32 requires 4-byte alignment)");
                 }
 
-                uint64_t inst_offset = cur_sec->data.size();
+                uint64_t inst_offset = cur_offset;
 
                 if (*mnem_opt == an32::Mnemonic::AUIPC) {
                     auipc_anchor_off = inst_offset;
@@ -438,9 +471,11 @@ void Assembler::process_statements(const std::vector<StatementPtr>& stmts, Secti
 
                 cur_sec->add_fragment(std::make_unique<InstructionFragment>(exp_inst.mnemonic, exp_inst.operands, exp_inst.span));
                 cur_sec->data.resize(cur_sec->data.size() + 4, 0);
+                cur_offset += 4; // advance logical offset for subsequent symbols
             }
         }
     }
+
 }
 
 void Assembler::perform_layout(SectionTable& sec_table, SymbolTable& /*symtab*/) {
@@ -509,18 +544,39 @@ void Assembler::perform_layout(SectionTable& sec_table, SymbolTable& /*symtab*/)
 void Assembler::encode_instructions(SectionTable& sec_table, SymbolTable& symtab, std::vector<Fixup>& /*fixups*/) {
     ExpressionEvaluator eval(diag_);
 
-    auto get_xreg = [](const OperandPtr& op) -> an32::XReg {
-        if (op && op->kind == OperandKind::REG_X) {
-            return an32::XReg(static_cast<uint8_t>(std::static_pointer_cast<XRegOperand>(op)->reg_index));
+    // Error-returning register extractors: never silently substitute x0/c0
+    auto get_xreg = [this](const OperandPtr& op, const SourceSpan& span) -> std::optional<an32::XReg> {
+        if (!op) {
+            diag_.error(span, "missing operand where integer register expected");
+            return std::nullopt;
         }
-        return an32::XReg(0);
+        if (op->kind != OperandKind::REG_X) {
+            diag_.error(span, "expected integer register (x0..x31), got wrong operand type");
+            return std::nullopt;
+        }
+        uint32_t idx = std::static_pointer_cast<XRegOperand>(op)->reg_index;
+        auto reg = an32::XReg::from_index(idx);
+        if (!reg) {
+            diag_.error(span, "integer register index out of range: x" + std::to_string(idx));
+        }
+        return reg;
     };
 
-    auto get_capreg = [](const OperandPtr& op) -> an32::CapReg {
-        if (op && op->kind == OperandKind::REG_CAP) {
-            return an32::CapReg(static_cast<uint8_t>(std::static_pointer_cast<CapRegOperand>(op)->reg_index));
+    auto get_capreg = [this](const OperandPtr& op, const SourceSpan& span) -> std::optional<an32::CapReg> {
+        if (!op) {
+            diag_.error(span, "missing operand where capability register expected");
+            return std::nullopt;
         }
-        return an32::CapReg(0);
+        if (op->kind != OperandKind::REG_CAP) {
+            diag_.error(span, "expected capability register (c0..c7), got wrong operand type");
+            return std::nullopt;
+        }
+        uint32_t idx = std::static_pointer_cast<CapRegOperand>(op)->reg_index;
+        auto reg = an32::CapReg::from_index(idx);
+        if (!reg) {
+            diag_.error(span, "capability register index out of range: c" + std::to_string(idx));
+        }
+        return reg;
     };
 
     auto get_imm_val = [&](const OperandPtr& op, uint64_t cur_pc) -> int64_t {
@@ -540,6 +596,7 @@ void Assembler::encode_instructions(SectionTable& sec_table, SymbolTable& symtab
         return 0;
     };
 
+
     for (const auto& sec_ptr : sec_table.get_sections()) {
         Section& sec = *sec_ptr;
         if (sec.data.empty()) continue;
@@ -553,6 +610,7 @@ void Assembler::encode_instructions(SectionTable& sec_table, SymbolTable& symtab
             if (!mnem_opt.has_value()) continue;
             an32::Mnemonic m = *mnem_opt;
             const auto& ops = ifrag->operands;
+            SourceSpan sp = ifrag->span;
 
             std::optional<uint32_t> word;
 
@@ -567,18 +625,32 @@ void Assembler::encode_instructions(SectionTable& sec_table, SymbolTable& symtab
                 m == an32::Mnemonic::DIV || m == an32::Mnemonic::DIVU ||
                 m == an32::Mnemonic::REM || m == an32::Mnemonic::REMU) {
                 if (ops.size() >= 3) {
-                    auto res = an32::Encoder::encode_r(m, get_xreg(ops[0]), get_xreg(ops[1]), get_xreg(ops[2]));
-                    if (res.is_ok()) word = res.value();
-                    else diag_.error(ifrag->span, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    auto rd = get_xreg(ops[0], sp);
+                    auto rs1 = get_xreg(ops[1], sp);
+                    auto rs2 = get_xreg(ops[2], sp);
+                    if (rd && rs1 && rs2) {
+                        auto res = an32::Encoder::encode_r(m, *rd, *rs1, *rs2);
+                        if (res.is_ok()) word = res.value();
+                        else diag_.error(sp, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    }
                 }
             }
-            // Shifts (I-type)
+            // Shifts (I-type with ShiftAmount5)
             else if (m == an32::Mnemonic::SLLI || m == an32::Mnemonic::SRLI || m == an32::Mnemonic::SRAI) {
                 if (ops.size() >= 3) {
-                    int64_t shamt = get_imm_val(ops[2], inst_offset);
-                    auto res = an32::Encoder::encode_shift(m, get_xreg(ops[0]), get_xreg(ops[1]), an32::ShiftAmount5(static_cast<uint8_t>(shamt & 0x1F)));
-                    if (res.is_ok()) word = res.value();
-                    else diag_.error(ifrag->span, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    auto rd = get_xreg(ops[0], sp);
+                    auto rs1 = get_xreg(ops[1], sp);
+                    int64_t shamt_val = get_imm_val(ops[2], inst_offset);
+                    if (rd && rs1) {
+                        auto shamt = an32::ShiftAmount5::from_value(static_cast<uint32_t>(shamt_val));
+                        if (!shamt) {
+                            diag_.error(sp, "shift amount out of range [0..31]: " + std::to_string(shamt_val));
+                        } else {
+                            auto res = an32::Encoder::encode_shift(m, *rd, *rs1, *shamt);
+                            if (res.is_ok()) word = res.value();
+                            else diag_.error(sp, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                        }
+                    }
                 }
             }
             // I-type arithmetic instructions
@@ -586,10 +658,19 @@ void Assembler::encode_instructions(SectionTable& sec_table, SymbolTable& symtab
                      m == an32::Mnemonic::SLTIU || m == an32::Mnemonic::XORI ||
                      m == an32::Mnemonic::ORI || m == an32::Mnemonic::ANDI) {
                 if (ops.size() >= 3) {
-                    int64_t imm = get_imm_val(ops[2], inst_offset);
-                    auto res = an32::Encoder::encode_i(m, get_xreg(ops[0]), get_xreg(ops[1]), an32::IImm12(static_cast<int16_t>(imm)));
-                    if (res.is_ok()) word = res.value();
-                    else diag_.error(ifrag->span, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    auto rd = get_xreg(ops[0], sp);
+                    auto rs1 = get_xreg(ops[1], sp);
+                    int64_t imm_val = get_imm_val(ops[2], inst_offset);
+                    if (rd && rs1) {
+                        auto imm = an32::IImm12::from_value(imm_val);
+                        if (!imm) {
+                            diag_.error(sp, "I-type immediate out of range [-2048..2047]: " + std::to_string(imm_val));
+                        } else {
+                            auto res = an32::Encoder::encode_i(m, *rd, *rs1, *imm);
+                            if (res.is_ok()) word = res.value();
+                            else diag_.error(sp, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                        }
+                    }
                 }
             }
             // Standard Load instructions (I-type)
@@ -597,12 +678,21 @@ void Assembler::encode_instructions(SectionTable& sec_table, SymbolTable& symtab
                      m == an32::Mnemonic::LW || m == an32::Mnemonic::LBU ||
                      m == an32::Mnemonic::LHU) {
                 if (ops.size() >= 2) {
+                    auto rd = get_xreg(ops[0], sp);
                     auto mem_op = std::dynamic_pointer_cast<MemoryOperand>(ops[1]);
-                    if (mem_op) {
-                        int64_t imm = get_imm_val(mem_op, inst_offset);
-                        auto res = an32::Encoder::encode_load(m, get_xreg(ops[0]), get_xreg(mem_op->base_reg), an32::IImm12(static_cast<int16_t>(imm)));
-                        if (res.is_ok()) word = res.value();
-                        else diag_.error(ifrag->span, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    if (rd && mem_op) {
+                        auto rs1 = get_xreg(mem_op->base_reg, sp);
+                        int64_t imm_val = get_imm_val(mem_op, inst_offset);
+                        if (rs1) {
+                            auto imm = an32::IImm12::from_value(imm_val);
+                            if (!imm) {
+                                diag_.error(sp, "load offset out of range [-2048..2047]: " + std::to_string(imm_val));
+                            } else {
+                                auto res = an32::Encoder::encode_load(m, *rd, *rs1, *imm);
+                                if (res.is_ok()) word = res.value();
+                                else diag_.error(sp, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                            }
+                        }
                     }
                 }
             }
@@ -610,12 +700,21 @@ void Assembler::encode_instructions(SectionTable& sec_table, SymbolTable& symtab
             else if (m == an32::Mnemonic::SB || m == an32::Mnemonic::SH ||
                      m == an32::Mnemonic::SW) {
                 if (ops.size() >= 2) {
+                    auto rs2 = get_xreg(ops[0], sp);
                     auto mem_op = std::dynamic_pointer_cast<MemoryOperand>(ops[1]);
-                    if (mem_op) {
-                        int64_t imm = get_imm_val(mem_op, inst_offset);
-                        auto res = an32::Encoder::encode_s(m, get_xreg(ops[0]), get_xreg(mem_op->base_reg), an32::SImm12(static_cast<int16_t>(imm)));
-                        if (res.is_ok()) word = res.value();
-                        else diag_.error(ifrag->span, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    if (rs2 && mem_op) {
+                        auto rs1 = get_xreg(mem_op->base_reg, sp);
+                        int64_t imm_val = get_imm_val(mem_op, inst_offset);
+                        if (rs1) {
+                            auto imm = an32::SImm12::from_value(imm_val);
+                            if (!imm) {
+                                diag_.error(sp, "store offset out of range [-2048..2047]: " + std::to_string(imm_val));
+                            } else {
+                                auto res = an32::Encoder::encode_s(m, *rs2, *rs1, *imm);
+                                if (res.is_ok()) word = res.value();
+                                else diag_.error(sp, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                            }
+                        }
                     }
                 }
             }
@@ -624,129 +723,219 @@ void Assembler::encode_instructions(SectionTable& sec_table, SymbolTable& symtab
                      m == an32::Mnemonic::BLT || m == an32::Mnemonic::BGE ||
                      m == an32::Mnemonic::BLTU || m == an32::Mnemonic::BGEU) {
                 if (ops.size() >= 3) {
+                    auto rs1 = get_xreg(ops[0], sp);
+                    auto rs2 = get_xreg(ops[1], sp);
                     int64_t offset = get_imm_val(ops[2], inst_offset);
-                    auto res = an32::Encoder::encode_b(m, get_xreg(ops[0]), get_xreg(ops[1]), an32::BranchOffset13(static_cast<int16_t>(offset)));
-                    if (res.is_ok()) word = res.value();
-                    else diag_.error(ifrag->span, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    if (rs1 && rs2) {
+                        auto boff = an32::BranchOffset13::from_value(offset);
+                        if (!boff) {
+                            diag_.error(sp, "branch offset out of range [-4096..4094] or misaligned: " + std::to_string(offset));
+                        } else {
+                            auto res = an32::Encoder::encode_b(m, *rs1, *rs2, *boff);
+                            if (res.is_ok()) word = res.value();
+                            else diag_.error(sp, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                        }
+                    }
                 }
             }
             // U-type instructions (LUI, AUIPC)
             else if (m == an32::Mnemonic::LUI || m == an32::Mnemonic::AUIPC) {
                 if (ops.size() >= 2) {
-                    int64_t imm = get_imm_val(ops[1], inst_offset);
-                    auto res = an32::Encoder::encode_u(m, get_xreg(ops[0]), an32::UImm20(static_cast<uint32_t>(imm)));
-                    if (res.is_ok()) word = res.value();
-                    else diag_.error(ifrag->span, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    auto rd = get_xreg(ops[0], sp);
+                    int64_t imm_val = get_imm_val(ops[1], inst_offset);
+                    if (rd) {
+                        auto uimm = an32::UImm20::from_value(static_cast<uint64_t>(imm_val) & 0xFFFFF);
+                        if (!uimm) {
+                            diag_.error(sp, "U-type immediate out of range [0..0xFFFFF]: " + std::to_string(imm_val));
+                        } else {
+                            auto res = an32::Encoder::encode_u(m, *rd, *uimm);
+                            if (res.is_ok()) word = res.value();
+                            else diag_.error(sp, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                        }
+                    }
                 }
             }
             // JAL (J-type)
             else if (m == an32::Mnemonic::JAL) {
                 if (ops.size() >= 2) {
+                    auto rd = get_xreg(ops[0], sp);
                     int64_t offset = get_imm_val(ops[1], inst_offset);
-                    auto res = an32::Encoder::encode_j(get_xreg(ops[0]), an32::JumpOffset21(static_cast<int32_t>(offset)));
-                    if (res.is_ok()) word = res.value();
-                    else diag_.error(ifrag->span, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    if (rd) {
+                        auto joff = an32::JumpOffset21::from_value(offset);
+                        if (!joff) {
+                            diag_.error(sp, "JAL offset out of range [-1048576..1048574] or misaligned: " + std::to_string(offset));
+                        } else {
+                            auto res = an32::Encoder::encode_j(*rd, *joff);
+                            if (res.is_ok()) word = res.value();
+                            else diag_.error(sp, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                        }
+                    }
                 }
             }
             // JALR (I-type)
             else if (m == an32::Mnemonic::JALR) {
                 if (ops.size() >= 2) {
+                    auto rd = get_xreg(ops[0], sp);
                     auto mem_op = std::dynamic_pointer_cast<MemoryOperand>(ops[1]);
-                    if (mem_op) {
-                        int64_t imm = get_imm_val(mem_op, inst_offset);
-                        auto res = an32::Encoder::encode_jalr(get_xreg(ops[0]), get_xreg(mem_op->base_reg), an32::IImm12(static_cast<int16_t>(imm)));
-                        if (res.is_ok()) word = res.value();
-                        else diag_.error(ifrag->span, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    if (rd && mem_op) {
+                        auto rs1 = get_xreg(mem_op->base_reg, sp);
+                        int64_t imm_val = get_imm_val(mem_op, inst_offset);
+                        if (rs1) {
+                            auto imm = an32::IImm12::from_value(imm_val);
+                            if (!imm) {
+                                diag_.error(sp, "JALR offset out of range [-2048..2047]: " + std::to_string(imm_val));
+                            } else {
+                                auto res = an32::Encoder::encode_jalr(*rd, *rs1, *imm);
+                                if (res.is_ok()) word = res.value();
+                                else diag_.error(sp, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                            }
+                        }
                     }
                 }
             }
             // Capability manipulation instructions (CAP_R-type)
             else if (m == an32::Mnemonic::CSETBOUNDS) {
                 if (ops.size() >= 3) {
-                    auto res = an32::Encoder::encode_csetbounds(get_capreg(ops[0]), get_capreg(ops[1]), get_xreg(ops[2]));
-                    if (res.is_ok()) word = res.value();
-                    else diag_.error(ifrag->span, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    auto cd = get_capreg(ops[0], sp);
+                    auto cs1 = get_capreg(ops[1], sp);
+                    auto rs2 = get_xreg(ops[2], sp);
+                    if (cd && cs1 && rs2) {
+                        auto res = an32::Encoder::encode_csetbounds(*cd, *cs1, *rs2);
+                        if (res.is_ok()) word = res.value();
+                        else diag_.error(sp, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    }
                 }
             }
             else if (m == an32::Mnemonic::CANDPERM) {
                 if (ops.size() >= 3) {
-                    auto res = an32::Encoder::encode_candperm(get_capreg(ops[0]), get_capreg(ops[1]), get_xreg(ops[2]));
-                    if (res.is_ok()) word = res.value();
-                    else diag_.error(ifrag->span, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    auto cd = get_capreg(ops[0], sp);
+                    auto cs1 = get_capreg(ops[1], sp);
+                    auto rs2 = get_xreg(ops[2], sp);
+                    if (cd && cs1 && rs2) {
+                        auto res = an32::Encoder::encode_candperm(*cd, *cs1, *rs2);
+                        if (res.is_ok()) word = res.value();
+                        else diag_.error(sp, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    }
                 }
             }
             else if (m == an32::Mnemonic::CINCOFFSET) {
                 if (ops.size() >= 3) {
-                    auto res = an32::Encoder::encode_cincoffset(get_capreg(ops[0]), get_capreg(ops[1]), get_xreg(ops[2]));
-                    if (res.is_ok()) word = res.value();
-                    else diag_.error(ifrag->span, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    auto cd = get_capreg(ops[0], sp);
+                    auto cs1 = get_capreg(ops[1], sp);
+                    auto rs2 = get_xreg(ops[2], sp);
+                    if (cd && cs1 && rs2) {
+                        auto res = an32::Encoder::encode_cincoffset(*cd, *cs1, *rs2);
+                        if (res.is_ok()) word = res.value();
+                        else diag_.error(sp, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    }
                 }
             }
             // Capability inspection (CGET-type)
             else if (m == an32::Mnemonic::CGETBASE) {
                 if (ops.size() >= 2) {
-                    auto res = an32::Encoder::encode_cgetbase(get_xreg(ops[0]), get_capreg(ops[1]));
-                    if (res.is_ok()) word = res.value();
-                    else diag_.error(ifrag->span, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    auto rd = get_xreg(ops[0], sp);
+                    auto cs1 = get_capreg(ops[1], sp);
+                    if (rd && cs1) {
+                        auto res = an32::Encoder::encode_cgetbase(*rd, *cs1);
+                        if (res.is_ok()) word = res.value();
+                        else diag_.error(sp, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    }
                 }
             }
             else if (m == an32::Mnemonic::CGETLEN) {
                 if (ops.size() >= 2) {
-                    auto res = an32::Encoder::encode_cgetlen(get_xreg(ops[0]), get_capreg(ops[1]));
-                    if (res.is_ok()) word = res.value();
-                    else diag_.error(ifrag->span, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    auto rd = get_xreg(ops[0], sp);
+                    auto cs1 = get_capreg(ops[1], sp);
+                    if (rd && cs1) {
+                        auto res = an32::Encoder::encode_cgetlen(*rd, *cs1);
+                        if (res.is_ok()) word = res.value();
+                        else diag_.error(sp, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    }
                 }
             }
             else if (m == an32::Mnemonic::CGETTAG) {
                 if (ops.size() >= 2) {
-                    auto res = an32::Encoder::encode_cgettag(get_xreg(ops[0]), get_capreg(ops[1]));
-                    if (res.is_ok()) word = res.value();
-                    else diag_.error(ifrag->span, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    auto rd = get_xreg(ops[0], sp);
+                    auto cs1 = get_capreg(ops[1], sp);
+                    if (rd && cs1) {
+                        auto res = an32::Encoder::encode_cgettag(*rd, *cs1);
+                        if (res.is_ok()) word = res.value();
+                        else diag_.error(sp, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    }
                 }
             }
             else if (m == an32::Mnemonic::CGETPERM) {
                 if (ops.size() >= 2) {
-                    auto res = an32::Encoder::encode_cgetperm(get_xreg(ops[0]), get_capreg(ops[1]));
-                    if (res.is_ok()) word = res.value();
-                    else diag_.error(ifrag->span, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    auto rd = get_xreg(ops[0], sp);
+                    auto cs1 = get_capreg(ops[1], sp);
+                    if (rd && cs1) {
+                        auto res = an32::Encoder::encode_cgetperm(*rd, *cs1);
+                        if (res.is_ok()) word = res.value();
+                        else diag_.error(sp, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    }
                 }
             }
             else if (m == an32::Mnemonic::CGETOFFSET) {
                 if (ops.size() >= 2) {
-                    auto res = an32::Encoder::encode_cgetoffset(get_xreg(ops[0]), get_capreg(ops[1]));
-                    if (res.is_ok()) word = res.value();
-                    else diag_.error(ifrag->span, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    auto rd = get_xreg(ops[0], sp);
+                    auto cs1 = get_capreg(ops[1], sp);
+                    if (rd && cs1) {
+                        auto res = an32::Encoder::encode_cgetoffset(*rd, *cs1);
+                        if (res.is_ok()) word = res.value();
+                        else diag_.error(sp, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    }
                 }
             }
             // Capability clear (CCLEAR-type)
             else if (m == an32::Mnemonic::CCLEAR) {
                 if (ops.size() >= 1) {
-                    auto res = an32::Encoder::encode_cclear(get_capreg(ops[0]));
-                    if (res.is_ok()) word = res.value();
-                    else diag_.error(ifrag->span, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    auto cd = get_capreg(ops[0], sp);
+                    if (cd) {
+                        auto res = an32::Encoder::encode_cclear(*cd);
+                        if (res.is_ok()) word = res.value();
+                        else diag_.error(sp, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    }
                 }
             }
             // Capability Load instructions (CAP_MEM_I-type)
             else if (m == an32::Mnemonic::CLB || m == an32::Mnemonic::CLH || m == an32::Mnemonic::CLW) {
                 if (ops.size() >= 2) {
+                    auto rd = get_xreg(ops[0], sp);
                     auto mem_op = std::dynamic_pointer_cast<MemoryOperand>(ops[1]);
-                    if (mem_op) {
-                        int64_t imm = get_imm_val(mem_op, inst_offset);
-                        auto res = an32::Encoder::encode_cap_load(m, get_xreg(ops[0]), get_capreg(mem_op->base_reg), an32::IImm12(static_cast<int16_t>(imm)));
-                        if (res.is_ok()) word = res.value();
-                        else diag_.error(ifrag->span, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    if (rd && mem_op) {
+                        auto cs1 = get_capreg(mem_op->base_reg, sp);
+                        int64_t imm_val = get_imm_val(mem_op, inst_offset);
+                        if (cs1) {
+                            auto imm = an32::IImm12::from_value(imm_val);
+                            if (!imm) {
+                                diag_.error(sp, "capability load offset out of range [-2048..2047]: " + std::to_string(imm_val));
+                            } else {
+                                auto res = an32::Encoder::encode_cap_load(m, *rd, *cs1, *imm);
+                                if (res.is_ok()) word = res.value();
+                                else diag_.error(sp, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                            }
+                        }
                     }
                 }
             }
             // Capability Store instructions (CAP_MEM_S-type)
             else if (m == an32::Mnemonic::CSB || m == an32::Mnemonic::CSH || m == an32::Mnemonic::CSW) {
                 if (ops.size() >= 2) {
+                    auto rs2 = get_xreg(ops[0], sp);
                     auto mem_op = std::dynamic_pointer_cast<MemoryOperand>(ops[1]);
-                    if (mem_op) {
-                        int64_t imm = get_imm_val(mem_op, inst_offset);
-                        auto res = an32::Encoder::encode_cap_store(m, get_xreg(ops[0]), get_capreg(mem_op->base_reg), an32::SImm12(static_cast<int16_t>(imm)));
-                        if (res.is_ok()) word = res.value();
-                        else diag_.error(ifrag->span, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    if (rs2 && mem_op) {
+                        auto cs1 = get_capreg(mem_op->base_reg, sp);
+                        int64_t imm_val = get_imm_val(mem_op, inst_offset);
+                        if (cs1) {
+                            auto imm = an32::SImm12::from_value(imm_val);
+                            if (!imm) {
+                                diag_.error(sp, "capability store offset out of range [-2048..2047]: " + std::to_string(imm_val));
+                            } else {
+                                auto res = an32::Encoder::encode_cap_store(m, *rs2, *cs1, *imm);
+                                if (res.is_ok()) word = res.value();
+                                else diag_.error(sp, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                            }
+                        }
                     }
                 }
             }
@@ -762,3 +951,4 @@ void Assembler::encode_instructions(SectionTable& sec_table, SymbolTable& symtab
 }
 
 } // namespace an32asm
+

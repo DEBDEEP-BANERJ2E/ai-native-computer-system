@@ -1,5 +1,5 @@
 CXX ?= clang++
-CXXFLAGS ?= -std=c++20 -Wall -Wextra -Wpedantic -O2 -Iinclude -Iassembler/include
+CXXFLAGS ?= -std=c++20 -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -O2 -Iinclude -Iassembler/include
 
 # ISA Library
 ISA_SRCS = src/types.cpp src/encoder.cpp src/decoder.cpp src/disasm.cpp src/isa_generated.cpp

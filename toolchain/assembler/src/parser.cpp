@@ -311,6 +311,9 @@ StatementPtr Parser::parse_directive() {
     while (!check(TokenType::NEWLINE) && !check(TokenType::SEMICOLON) && !check(TokenType::END_OF_FILE)) {
         if (check(TokenType::STRING)) {
             stmt->string_args.push_back(advance().text);
+        } else if (check(TokenType::AT_IDENTIFIER)) {
+            // @function, @object, @progbits, @nobits etc.
+            stmt->string_args.push_back(advance().text);
         } else if (check(TokenType::IDENTIFIER) && stmt->directive_type == TokenType::DIR_TYPE) {
             stmt->symbol_arg = advance().text;
         } else if (check(TokenType::IDENTIFIER) && stmt->directive_type == TokenType::DIR_SIZE) {

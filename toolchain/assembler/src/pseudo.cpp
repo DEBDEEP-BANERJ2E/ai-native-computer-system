@@ -19,8 +19,9 @@ std::optional<uint32_t> PseudoExpander::normalize_u32_literal(int64_t val) {
 std::pair<int64_t, int64_t> PseudoExpander::decompose_li(int64_t val) {
     uint32_t u32 = static_cast<uint32_t>(val);
     int32_t s32 = static_cast<int32_t>(u32);
-    int32_t hi = static_cast<int32_t>((u32 + 0x800) >> 12);
-    int32_t lo = s32 - (hi << 12);
+    // User-mandated widened signed arithmetic (no overflow-prone shifts)
+    int64_t hi = (static_cast<int64_t>(s32) + 0x800LL) >> 12;
+    int64_t lo = static_cast<int64_t>(s32) - hi * 4096LL;
     return {hi & 0xFFFFF, lo};
 }
 

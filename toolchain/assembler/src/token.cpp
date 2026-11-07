@@ -114,6 +114,7 @@ std::string Token::to_string() const {
         case TokenType::MOD_PCREL_LO:   return "%pcrel_lo";
         case TokenType::MACRO_UNIQUE_ID:return "\\@";
         case TokenType::MACRO_PARAM_REF:return "MACRO_PARAM(" + text + ")";
+        case TokenType::AT_IDENTIFIER:  return text;
         default:                        return text.empty() ? "<TOKEN>" : text;
     }
 }

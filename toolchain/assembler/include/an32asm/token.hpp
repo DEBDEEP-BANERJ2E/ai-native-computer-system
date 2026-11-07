@@ -95,6 +95,9 @@ enum class TokenType {
     REG_X,              // x0..x31, zero, ra, sp, etc.
     REG_CAP,            // c0..c7, cnull, cram, cmmio, ca0, ca1, ct0, cs0, cs1
 
+    // @ + identifier (e.g. @function, @object, @progbits, @nobits)
+    AT_IDENTIFIER,      // @<word>
+
     // Macro Special
     MACRO_UNIQUE_ID,    // \@
     MACRO_PARAM_REF     // \param or $param

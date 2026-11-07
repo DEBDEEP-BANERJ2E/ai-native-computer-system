@@ -673,6 +673,26 @@ std::vector<Token> Lexer::tokenize() {
             continue;
         }
 
+        // @ + identifier -> AT_IDENTIFIER (e.g. @function, @object, @progbits, @nobits)
+        if (c == '@') {
+            advance(); // consume '@'
+            if (offset_ < content_.size() && (std::isalpha(peek()) || peek() == '_')) {
+                uint32_t word_start = offset_;
+                while (offset_ < content_.size() && (std::isalnum(peek()) || peek() == '_')) {
+                    advance();
+                }
+                Token tok;
+                tok.type = TokenType::AT_IDENTIFIER;
+                tok.span = SourceSpan(start, current_pos());
+                tok.text = "@" + std::string(content_.substr(word_start, offset_ - word_start));
+                tokens.push_back(tok);
+            } else {
+                // Bare '@' — emit as unknown/error
+                diag_.error(SourceSpan(start, current_pos()), "bare '@' without identifier");
+            }
+            continue;
+        }
+
         // Unknown character
         advance();
         diag_.error(SourceSpan(start, current_pos()), std::string("unexpected character '") + c + "'");

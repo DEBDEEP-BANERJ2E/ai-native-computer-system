@@ -36,7 +36,7 @@ private:
     std::vector<std::string> include_paths_;
     std::unordered_map<std::string, MacroDef> macros_;
     std::unordered_map<std::string, int64_t> constants_;
-    std::unordered_set<std::string> included_files_;
+    std::vector<std::string> include_stack_;       // Active include stack for cycle detection
     uint32_t unique_expansion_counter_ = 0;
 
     std::optional<std::string> find_include_file(const std::string& filename) const;

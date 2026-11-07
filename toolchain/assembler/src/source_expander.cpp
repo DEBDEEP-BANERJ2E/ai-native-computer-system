@@ -249,18 +249,28 @@ std::vector<Token> SourceExpander::expand_macro(const MacroDef& macro,
 
         // 3. Hygiene for numeric local labels inside macro (1: -> unique symbol)
         if (tok.type == TokenType::LOCAL_LABEL_DEF) {
-            Token syn_tok;
-            syn_tok.type = TokenType::IDENTIFIER;
-            syn_tok.text = "__macro_" + std::to_string(exp_id) + "_lbl_" + std::to_string(tok.local_label_num) + ":";
-            syn_tok.span = tok.span;
-            syn_tok.span.expansion = exp_ctx;
-            expanded.push_back(syn_tok);
+            std::string syn_name = "__macro_" + std::to_string(exp_id) + "_lbl_" + std::to_string(tok.local_label_num);
+            // Emit as IDENTIFIER token (the name)
+            Token name_tok;
+            name_tok.type = TokenType::IDENTIFIER;
+            name_tok.text = syn_name;
+            name_tok.span = tok.span;
+            name_tok.span.expansion = exp_ctx;
+            expanded.push_back(name_tok);
+            // Emit a COLON token to form the label definition
+            Token colon_tok;
+            colon_tok.type = TokenType::COLON;
+            colon_tok.text = ":";
+            colon_tok.span = tok.span;
+            colon_tok.span.expansion = exp_ctx;
+            expanded.push_back(colon_tok);
             continue;
         }
         if (tok.type == TokenType::LOCAL_LABEL_REF) {
+            std::string syn_name = "__macro_" + std::to_string(exp_id) + "_lbl_" + std::to_string(tok.local_label_num);
             Token syn_tok;
             syn_tok.type = TokenType::IDENTIFIER;
-            syn_tok.text = "__macro_" + std::to_string(exp_id) + "_lbl_" + std::to_string(tok.local_label_num);
+            syn_tok.text = syn_name;
             syn_tok.span = tok.span;
             syn_tok.span.expansion = exp_ctx;
             expanded.push_back(syn_tok);
@@ -458,10 +468,20 @@ std::vector<Token> SourceExpander::expand(const std::vector<Token>& input_tokens
                     std::string inc_file = current_tokens[j].text;
                     auto found_path = find_include_file(inc_file);
                     if (found_path) {
-                        if (included_files_.count(*found_path)) {
-                            diag_.error(tok.span, "circular .include detected for file: '" + inc_file + "'");
+                        // Active-stack cycle detection: only block if file is
+                        // currently on the include stack (A→B→A), not merely
+                        // because it was included before (repeated includes are legal)
+                        bool on_stack = false;
+                        for (const auto& stk_path : include_stack_) {
+                            if (stk_path == *found_path) { on_stack = true; break; }
+                        }
+                        if (on_stack) {
+                            std::string trace;
+                            for (const auto& s : include_stack_) trace += "  -> " + s + "\n";
+                            trace += "  -> " + *found_path;
+                            diag_.error(tok.span, "recursive .include cycle detected:\n" + trace);
                         } else {
-                            included_files_.insert(*found_path);
+                            include_stack_.push_back(*found_path);
                             auto inc_id = sm_.load_file(*found_path);
                             if (inc_id) {
                                 Lexer inc_lexer(sm_, *inc_id, diag_);
@@ -474,6 +494,7 @@ std::vector<Token> SourceExpander::expand(const std::vector<Token>& input_tokens
                             } else {
                                 diag_.error(tok.span, "failed to read included file: '" + *found_path + "'");
                             }
+                            include_stack_.pop_back();
                         }
                     } else {
                         diag_.error(tok.span, "could not find include file: '" + inc_file + "'");
