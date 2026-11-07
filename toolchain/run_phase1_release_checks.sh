@@ -18,13 +18,31 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+# Resolve a Python interpreter with PyYAML (same policy as phase2 runner).
+resolve_python() {
+    local candidates=("${PYTHON:-}" python3 /opt/anaconda3/bin/python3 /usr/bin/python3)
+    local py
+    for py in "${candidates[@]}"; do
+        [ -n "$py" ] || continue
+        if command -v "$py" >/dev/null 2>&1 && "$py" -c "import yaml" >/dev/null 2>&1; then
+            echo "$py"; return 0
+        fi
+    done
+    return 1
+}
+if ! PYTHON_BIN="$(resolve_python)"; then
+    echo "ERROR: no Python interpreter with PyYAML found. Set PYTHON=/path/to/python."
+    exit 1
+fi
+export PYTHON="${PYTHON_BIN}"
+
 echo "=================================================================="
 echo "  PHASE 1 MASTER RELEASE CHECKS & VERIFICATION RUNNER"
 echo "=================================================================="
 
 # 1. Spec table generation sync check
 echo ">>> [1/8] Checking deterministic ISA spec synchronization..."
-python3 "${SCRIPT_DIR}/tools/gen_isa_tables.py" --check
+"${PYTHON_BIN}" "${SCRIPT_DIR}/tools/gen_isa_tables.py" --check
 
 # 2. Makefile build
 echo ">>> [2/8] Building liban32isa and CLI tools via Makefile..."
