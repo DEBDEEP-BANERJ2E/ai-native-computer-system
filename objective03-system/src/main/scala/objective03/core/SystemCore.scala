@@ -610,7 +610,7 @@ class SystemCore(
   val sysWbEarly = sysMemWb.io.out
   val wbIsReturnEarly = memWbReg.io.out.valid && sysWbEarly.valid &&
                         (sysWbEarly.isMret || sysWbEarly.isSret)
-  val wbMemWriteBlock = takePreciseTrap || takeSysTrap || wbIsReturnEarly
+  val wbMemWriteBlock = takePreciseTrap || takeSysTrap || wbIsReturnEarly || fenceIRetire
 
   // ---- MMIO: SystemMMIO + TimerBlock share 0x8000xxxx ----
   systemMMIO.io.address     := exMemReg.io.out.aluResult

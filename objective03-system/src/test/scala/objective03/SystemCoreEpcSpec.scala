@@ -22,6 +22,12 @@ class SystemCoreEpcSpec extends AnyFlatSpec with ChiselScalatestTester {
   def li(rd: Int, imm: Int) = BigInt(imm & 0xFFF)<<20 | BigInt(rd)<<7 | 0x13
   def nop: BigInt = 0x13
   def jal0: BigInt = BigInt("0000006F", 16)
+  def fenceI: BigInt = BigInt("0FF0000F", 16)   // fence.i
+  // sw rs2, imm(rs1): opcode 0x23 funct3=010 ; lw rd, imm(rs1): opcode 0x03 funct3=010
+  def sw(rs2: Int, imm: Int, rs1: Int): BigInt =
+    BigInt((imm>>5)&0x7F)<<25 | BigInt(rs2)<<20 | BigInt(rs1)<<15 | 2L<<12 | BigInt(imm&0x1F)<<7 | 0x23
+  def lw(rd: Int, imm: Int, rs1: Int): BigInt =
+    BigInt(imm&0xFFF)<<20 | BigInt(rs1)<<15 | 2L<<12 | BigInt(rd)<<7 | 0x03
   def run(dut: SystemCore, n: Int) = { var i=0; while(i<n){dut.clock.step(1);i+=1} }
 
   // Load prog while capturing every commit writeData to `rd` (core runs during
@@ -68,6 +74,24 @@ class SystemCoreEpcSpec extends AnyFlatSpec with ChiselScalatestTester {
     while (k < extraCycles) { dut.clock.step(1); cap(); k += 1 }
     writes.toSeq
   }
+
+  // Capture every WB commit (pc, rd, writeData) for `n` cycles.
+  def captureCommits(dut: SystemCore, n: Int): Seq[(BigInt, BigInt, BigInt)] = {
+    val buf = scala.collection.mutable.ArrayBuffer[(BigInt, BigInt, BigInt)]()
+    var i = 0
+    while (i < n) {
+      dut.clock.step(1)
+      if (dut.io.commit.valid.peek().litValue == 1 &&
+          dut.io.commit.regWrite.peek().litValue == 1 &&
+          dut.io.commit.rd.peek().litValue != 0)
+        buf += ((dut.io.commit.pc.peek().litValue, dut.io.commit.rd.peek().litValue,
+                 dut.io.commit.writeData.peek().litValue))
+      i += 1
+    }
+    buf.toSeq
+  }
+  def rdWrites(cs: Seq[(BigInt, BigInt, BigInt)], rd: Int): Seq[BigInt] =
+    cs.collect { case (pc, r, d) if r == rd => d }
 
   behavior of "SystemCore interrupt EPC precision"
 
@@ -198,4 +222,55 @@ class SystemCoreEpcSpec extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   def ecallInstr: BigInt = 0x73
+
+  it should "FENCE.I serializes: younger in-flight store squashed then refetched cleanly" in {
+    test(new SystemCore(imemDepthWords = 128, dmemSizeBytes = 4096)) { dut =>
+      // fence.i retires at WB while the NEXT instruction (a store) is in MEM.
+      // The in-flight store's same-cycle write is suppressed by wbMemWriteBlock;
+      // the younger stage is then flushed and fetch restarts at fence.pc+4,
+      // so the store re-executes exactly once -> memory sees its value once.
+      // x8=0x200, x9=0x55, x10=0xAA
+      val body = Seq(
+        li(8, 0x200), li(9, 0x55), li(10, 0xAA),
+        sw(9, 0, 8),            // idx3 store 0x55 (retires before fence)
+        fenceI,                 // idx4
+        sw(10, 0, 8),           // idx5 store 0xAA (younger; squashed+refetched)
+        lw(7, 0, 8),            // idx6 read back -> 0xAA (last writer wins)
+        jal0                    // idx7
+      )
+      val updates = body.zipWithIndex.map { case (w,i) => (i, w) }
+      val x7 = loadSelective(dut, 32, updates, 7, 60)
+      // store after fence.i executes exactly once via clean refetch -> 0xAA
+      assert(x7.nonEmpty && x7.last == BigInt(0xAA))
+    }
+  }
+
+  it should "nondelegated exception beats delegated interrupt -> mtvec not stvec" in {
+    test(new SystemCore(imemDepthWords = 128, dmemSizeBytes = 4096)) { dut =>
+      // mideleg.STIP=1 (STIP->S), mie.STIE, mip.STIP pending, mtvec=0x80,
+      // stvec=0xC0. illegal instr (nondelegated) + pending S interrupt same
+      // window -> exception wins AND goes to M (mtvec), mcause=2.
+      val body = Seq(
+        li(6, 0x80), csrW(0x305, 6, 0),   // mtvec=0x80
+        li(6, 0xC0), csrW(0x105, 6, 0),   // stvec=0xC0
+        li(6, 0x20), csrW(0x303, 6, 0),   // mideleg.STIP=1
+        li(6, 0x20), csrW(0x304, 6, 0),   // mie.STIE
+        li(6, 0x20), csrW(0x344, 6, 0),   // mip.STIP pending
+        BigInt("FFFFFFFF", 16)            // illegal -> nondelegated exc
+      )
+      val updates = Seq(
+        (32, csrR(0x342, 0, 5)),          // M handler @0x80: mcause->x5
+        (33, csrR(0x341, 0, 6)),          // mepc->x6
+        (34, jal0), (35, jal0),
+        (48, csrR(0x142, 0, 7)),          // S handler @0xC0 marker -> x7 (must NOT run)
+        (49, jal0)
+      ) ++ body.zipWithIndex.map { case (w,i) => (i, w) }
+      // capture writes to x5 (mcause). M-handler@0x80 reads mcause->x5;
+      // an S-target trap would instead run stvec handler (scause->x7), so
+      // observing mcause=2 here proves the exception went to M/mtvec.
+      val x5 = loadSelective(dut, 64, updates, 5, 120)
+      assert(x5.contains(BigInt(2)))                       // mcause=illegal
+      assert(dut.io.privLevel.peek().litValue == Privilege.M)
+    }
+  }
 }

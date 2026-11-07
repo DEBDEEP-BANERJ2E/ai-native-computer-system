@@ -136,7 +136,9 @@ class TrapController extends Module {
   // Interrupt target privilege was resolved during candidate selection
   // (mideleg -> S else M). Exceptions delegate via medeleg when priv < M.
   val intrToS = intrValid && intrTargetPriv === Privilege.S.U(2.W)
-  val toSupervisor = excDelegated || intrToS
+  // Destination follows the winning event: a synchronous exception that
+  // beats a simultaneous interrupt must use ITS delegation, not the interrupt's.
+  val toSupervisor = Mux(excValid, excDelegated, intrToS)
 
   // Trap cause value: interrupt gets MSB set; exception keeps code
   val finalCause = Mux(intrValid && !excValid,
