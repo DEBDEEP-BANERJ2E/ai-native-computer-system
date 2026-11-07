@@ -34,6 +34,24 @@ class CSRFileIO extends Bundle {
 
   val privLevel       = Output(UInt(2.W))
   val interruptEnable = Output(Bool())
+
+  // Machine-state observability for TrapController
+  val mstatusOut  = Output(UInt(32.W))
+  val mieOut      = Output(UInt(32.W))
+  val mipOut      = Output(UInt(32.W))
+  val medelegOut  = Output(UInt(32.W))
+  val midelegOut  = Output(UInt(32.W))
+  val mtvecOut    = Output(UInt(32.W))
+  val stvecOut    = Output(UInt(32.W))
+  val mepcOut     = Output(UInt(32.W))
+  val sepcOut     = Output(UInt(32.W))
+  val sieViewOut  = Output(UInt(32.W))
+  val sipViewOut  = Output(UInt(32.W))
+
+  // Legality probe: combinational check for an arbitrary access
+  val probeAddr    = Input(UInt(32.W))
+  val probeIsWrite = Input(Bool())
+  val probeIllegal = Output(Bool())
 }
 
 class TrapEntryBundle extends Bundle {
@@ -250,6 +268,32 @@ class CSRFile extends Module {
   io.interruptEnable := Mux(priv === Privilege.M.U(2.W),
                             mstatus(MstatusBits.MIE),
                             mstatus(SstatusView.SIE))
+
+  io.mstatusOut  := mstatus
+  io.mieOut      := mie
+  io.mipOut      := mip
+  io.medelegOut  := medeleg
+  io.midelegOut  := mideleg
+  io.mtvecOut    := mtvec
+  io.stvecOut    := stvec
+  io.mepcOut     := mepc
+  io.sepcOut     := sepc
+  io.sieViewOut  := mie & SIE_ALIAS_MASK & mideleg
+  io.sipViewOut  := mip & SIP_ALIAS_MASK & mideleg
+
+  // Probe legality (same rules as io.illegal, on probe inputs)
+  val pa = io.probeAddr
+  val pIsM = pa === CSR.MSTATUS.U || pa === CSR.MEDELEG.U || pa === CSR.MIDELEG.U ||
+             pa === CSR.MIE.U || pa === CSR.MTVEC.U || pa === CSR.MISA.U ||
+             pa === CSR.MCOUNTEREN.U || pa === CSR.MSCRATCH.U || pa === CSR.MEPC.U ||
+             pa === CSR.MCAUSE.U || pa === CSR.MTVAL.U || pa === CSR.MIP.U
+  val pIsS = pa === CSR.SSTATUS.U || pa === CSR.SIE.U || pa === CSR.STVEC.U ||
+             pa === CSR.SCOUNTEREN.U || pa === CSR.SSCRATCH.U || pa === CSR.SEPC.U ||
+             pa === CSR.SCAUSE.U || pa === CSR.STVAL.U || pa === CSR.SIP.U || pa === CSR.SATP.U
+  val pKnown = pIsM || pIsS
+  val pRO = pa(11, 10) === "b01".U || pa === CSR.MISA.U
+  val pMinPriv = Mux(pIsM, Privilege.M.U(2.W), Mux(pIsS, Privilege.S.U(2.W), 0.U(2.W)))
+  io.probeIllegal := !pKnown || !(priv >= pMinPriv) || (io.probeIsWrite && pRO)
 }
 
 // Supervisor-view bit positions (shared with mstatus bit positions)

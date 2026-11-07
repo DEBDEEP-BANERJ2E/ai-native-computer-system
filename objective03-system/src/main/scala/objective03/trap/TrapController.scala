@@ -49,6 +49,10 @@ class TrapControllerIO extends Bundle {
   // supplied by the pipeline (exception events carry their own epc)
   val curPc = Input(UInt(32.W))
 
+  // Interrupt accept qualifier: interrupts are only taken at an
+  // architectural retirement boundary (WB valid in SystemCore)
+  val intrQualify = Input(Bool())
+
   // Outputs
   val trapEntry   = Output(new objective03.csr.TrapEntryBundle)
   val trapVector  = Output(UInt(32.W))
@@ -100,7 +104,7 @@ class TrapController extends Module {
   val sIntrSel = Mux(hasSEI, TrapCause.SEIP.U, Mux(hasSSI, TrapCause.SSIP.U, TrapCause.STIP.U))
   val hasAnySIntr = hasSEI || hasSSI || hasSTI
 
-  val intrValid = globalIE && pendingForCurrent &&
+  val intrValid = globalIE && pendingForCurrent && io.intrQualify &&
     Mux(io.privLevel === Privilege.M.U(2.W), hasAnyMIntr, hasAnySIntr)
 
   val selectedIntrCause = Mux(io.privLevel === Privilege.M.U(2.W),
