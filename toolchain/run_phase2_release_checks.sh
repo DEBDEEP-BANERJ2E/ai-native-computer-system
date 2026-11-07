@@ -17,6 +17,28 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+# Resolve a Python interpreter that has PyYAML (required by gen_isa_tables.py).
+# Honors $PYTHON if preset; otherwise probes common interpreters.
+resolve_python() {
+    local candidates=("${PYTHON:-}" python3 /opt/anaconda3/bin/python3 /usr/bin/python3)
+    local py
+    for py in "${candidates[@]}"; do
+        [ -n "$py" ] || continue
+        if command -v "$py" >/dev/null 2>&1 && "$py" -c "import yaml" >/dev/null 2>&1; then
+            echo "$py"
+            return 0
+        fi
+    done
+    return 1
+}
+
+if ! PYTHON_BIN="$(resolve_python)"; then
+    echo "ERROR: No Python interpreter with PyYAML found on PATH."
+    echo "Install pyyaml (pip install pyyaml) or set PYTHON=/path/to/python."
+    exit 1
+fi
+echo "Using Python interpreter: ${PYTHON_BIN}"
+
 echo "=================================================================="
 echo "  AN32 PHASE 2 MASTER RELEASE CHECKS & VERIFICATION RUNNER"
 echo "=================================================================="
@@ -27,7 +49,7 @@ echo ""
 
 # 1. Spec table generation sync check
 echo ">>> [1/8] Checking deterministic ISA spec synchronization..."
-python3 "${SCRIPT_DIR}/tools/gen_isa_tables.py" --check
+"${PYTHON_BIN}" "${SCRIPT_DIR}/tools/gen_isa_tables.py" --check
 echo "Phase 0 ISA specification check passed."
 echo ""
 
@@ -51,7 +73,7 @@ echo ""
 
 # 4. Phase 1 & Phase 2 C++ Unit Tests (17 suites)
 echo ">>> [4/8] Running all Phase 1 and Phase 2 C++ unit test suites (17 suites)..."
-make -C "${SCRIPT_DIR}" test
+make -C "${SCRIPT_DIR}" test PYTHON="${PYTHON_BIN}"
 echo "All 17 Phase 1 and Phase 2 unit test suites passed (100%)."
 echo ""
 

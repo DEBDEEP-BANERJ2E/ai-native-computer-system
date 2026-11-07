@@ -1,5 +1,6 @@
 CXX ?= clang++
 CXXFLAGS ?= -std=c++20 -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -O2 -Iinclude -Iassembler/include
+PYTHON ?= python3
 
 # ISA Library
 ISA_SRCS = src/types.cpp src/encoder.cpp src/decoder.cpp src/disasm.cpp src/isa_generated.cpp
@@ -67,7 +68,7 @@ test_phase1: $(PHASE1_TESTS)
 	@echo "=================================================================="
 	@echo "  RUNNING LIBAN32ISA UNIT TEST SUITE"
 	@echo "=================================================================="
-	@python3 tools/gen_isa_tables.py --check
+	@$(PYTHON) tools/gen_isa_tables.py --check
 	@./bin/test_encoder
 	@./bin/test_decoder
 	@./bin/test_immediates
