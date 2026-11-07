@@ -44,6 +44,25 @@ class SystemCoreSpec extends AnyFlatSpec with ChiselScalatestTester {
     var i = 0; while (i < n) { dut.clock.step(1); i += 1 }
   }
 
+  // Capture every WB commit (pc, rd, writeData) while running `n` cycles.
+  def captureCommits(dut: SystemCore, n: Int): Seq[(BigInt, BigInt, BigInt)] = {
+    val buf = scala.collection.mutable.ArrayBuffer[(BigInt, BigInt, BigInt)]()
+    var i = 0
+    while (i < n) {
+      dut.clock.step(1)
+      if (dut.io.commit.valid.peek().litValue == 1 &&
+          dut.io.commit.regWrite.peek().litValue == 1 &&
+          dut.io.commit.rd.peek().litValue != 0) {
+        buf += ((dut.io.commit.pc.peek().litValue, dut.io.commit.rd.peek().litValue,
+                 dut.io.commit.writeData.peek().litValue))
+      }
+      i += 1
+    }
+    buf.toSeq
+  }
+  def rdWrites(cs: Seq[(BigInt, BigInt, BigInt)], rd: Int): Seq[BigInt] =
+    cs.collect { case (pc, r, d) if r == rd => d }
+
   // read a CSR by executing csrrs x5,csr,x0 then checking commit writeData
   // simpler: use trap observability + privLevel for trap tests
 
@@ -261,116 +280,171 @@ class SystemCoreInterruptSpec extends AnyFlatSpec with ChiselScalatestTester {
     var i = 0; while (i < n) { dut.clock.step(1); i += 1 }
   }
 
+  // Capture every WB commit (pc, rd, writeData) while running `n` cycles.
+  def captureCommits(dut: SystemCore, n: Int): Seq[(BigInt, BigInt, BigInt)] = {
+    val buf = scala.collection.mutable.ArrayBuffer[(BigInt, BigInt, BigInt)]()
+    var i = 0
+    while (i < n) {
+      dut.clock.step(1)
+      if (dut.io.commit.valid.peek().litValue == 1 &&
+          dut.io.commit.regWrite.peek().litValue == 1 &&
+          dut.io.commit.rd.peek().litValue != 0) {
+        buf += ((dut.io.commit.pc.peek().litValue, dut.io.commit.rd.peek().litValue,
+                 dut.io.commit.writeData.peek().litValue))
+      }
+      i += 1
+    }
+    buf.toSeq
+  }
+  def rdWrites(cs: Seq[(BigInt, BigInt, BigInt)], rd: Int): Seq[BigInt] =
+    cs.collect { case (pc, r, d) if r == rd => d }
+
   // CSR addrs: mtvec=0x305 stvec=0x105 mie=0x304 mie=0x304 mip=0x344 mideleg=0x303 mideleg=0x303
   // mstatus=0x300 sstatus=0x100 sie=0x104 sip=0x144 sepc=0x141 scause=0x142 stval=0x143
   // mepc=0x341 mcause=0x342 mtval=0x343 medeleg=0x302 mideleg=0x303
 
   behavior of "SystemCore interrupts"
 
-  it should "inject STIP via mip and trap to M when not delegated" in {
+  // CSR addrs used below:
+  //   mtvec=0x305 stvec=0x105 mie=0x304 mip=0x344 mideleg=0x303 mstatus=0x300
+  //   mepc=0x341 mcause=0x342 sepc=0x141 scause=0x142 stvec=0x105
+  // STIP irq bit=5 (cause 5), MTIP irq bit=7 (cause 7). Interrupt bit = 0x80000000.
+
+  // Preload `size` slots with jal0 (safe spin), then apply (idx->instr)
+  // updates in order so no illegal/zero instruction is ever fetched.
+  def loadSafe(dut: SystemCore, size: Int, updates: Seq[(Int, BigInt)]): Unit = {
+    (0 until size).foreach { i =>
+      dut.io.imemLoadAddr.poke((i * 4).U); dut.io.imemLoadData.poke(jal0.U)
+      dut.io.imemLoadEn.poke(true.B); dut.clock.step(1)
+    }
+    updates.foreach { case (i, w) =>
+      dut.io.imemLoadAddr.poke((i * 4).U); dut.io.imemLoadData.poke(w.U)
+      dut.io.imemLoadEn.poke(true.B); dut.clock.step(1)
+    }
+    dut.io.imemLoadEn.poke(false.B)
+    dut.io.imemLoadAddr.poke(0.U); dut.io.imemLoadData.poke(0.U)
+  }
+
+  it should "M-target STIP interrupt: mcause/mepc correct, handler reached, stays M" in {
     test(new SystemCore(imemDepthWords = 128, dmemSizeBytes = 4096)) { dut =>
-      // Program: set mtvec=0x80; mie.STIE(bit5)=1; mstatus.MIE(bit3)=1; mip.STIP(bit5)=1; loop
-      // STIP cause = 5. Trap -> M, mcause = 0x80000005
-      // x6=0x20 (STIP bit), x7=0x28 (STIE|MIE? mie bit5=0x20, mstatus bit3=0x8)
-      val setup = Seq(
-        li(6, 0x80), csrW(0x305, 6, 0),          // mtvec=0x80
-        li(6, 0x20), csrW(0x304, 6, 0),          // mie.STIE=1
-        li(6, 0x08), csrW(0x300, 6, 0),          // mstatus.MIE=1 (also clears MPP->U? 0x8=bit3 only, MPP bits12:11=0 -> careful!)
-        // NOTE: mstatus=0x8 sets MIE but MPP=00 -> next mret->U; fine for now (stay M via no mret)
-        li(6, 0x20), csrW(0x344, 6, 0),          // mip.STIP=1 -> pending
-        csrWi(0x344, 0, 0)                        // csrrwi? keep simple
+      // STIP not delegated -> M target. Handler @0x80 reads mcause->x5, mepc->x6.
+      val body = Seq(
+        li(6, 0x80), csrW(0x305, 6, 0),   // mtvec=0x80 (direct)
+        li(6, 0x20), csrW(0x304, 6, 0),   // mie.STIE (bit5=0x20)
+        li(6, 0x08), csrW(0x300, 6, 0),   // mstatus.MIE (bit3=0x08)
+        li(6, 0x20), csrW(0x344, 6, 0)    // mip.STIP=1 -> pending
       )
-      // handler at 0x80 = idx32: read mcause->x5, mepc->x6, mret? just loop
-      val handler = Seq(csrR(0x342, 0, 5), csrR(0x341, 0, 6), jal0)
-      val prog = (setup ++ Seq.fill(32 - setup.size)(nop)) ++ handler ++ Seq.fill(8)(nop)
-      loadProg(dut, prog)
-      run(dut, 80)
-      // interrupt should have fired: check a commit wrote mcause=0x80000005 to x5
-      // we can't easily assert history; check priv stayed M and no illegal
+      val updates = Seq(
+        (32, csrR(0x342, 0, 5)),          // handler @0x80: mcause->x5
+        (33, csrR(0x341, 0, 6)),          // mepc->x6
+        (34, jal0), (35, jal0)
+      ) ++ body.zipWithIndex.map { case (w, i) => (i, w) }
+      loadSafe(dut, 64, updates)
+      val cs = captureCommits(dut, 160)
+      // STIP not delegated -> M trap: mcause = STIP|INT = 0x80000005
+      assert(rdWrites(cs, 5).contains(BigInt("80000005", 16)))
+      // mepc = next unretired instr after mip.STIP commit (4-aligned, in body)
+      val mepc = rdWrites(cs, 6).lastOption.map(_.toLong & 0xffffffffL).getOrElse(-1L)
+      assert(mepc >= 28 && mepc <= 44 && (mepc % 4) == 0)
       assert(dut.io.privLevel.peek().litValue == Privilege.M)
     }
   }
 
-  it should "delegate STIP to S via mideleg and trap to S handler" in {
+  it should "delegated STIP in M-mode does NOT trap down to S" in {
     test(new SystemCore(imemDepthWords = 128, dmemSizeBytes = 4096)) { dut =>
-      // mideleg.STIP(bit5)=1, mie.STIE=1, mip.STIP=1, sstatus.SIE=1
-      // In M-mode, delegated S-interrupt can preempt M? Standard: S-target intr
-      // preempts lower priv (U) regardless of SIE; in M it needs... actually
-      // delegated intr targets S only when current priv < S i.e. U, OR when in S needs SIE.
-      // From M-mode, an S-delegated interrupt should NOT fire (can't go M->S).
-      // So test: stay in M, set everything, verify NO trap (priv stays M, no redirect).
-      val prog = Seq(
-        li(6, 0x20), csrW(0x303, 6, 0),   // mideleg.STIP=1
-        li(6, 0x20), csrW(0x304, 6, 0),   // mie.STIE=1
-        li(6, 0x08), csrW(0x300, 6, 0),   // mstatus.MIE=1
-        li(6, 0x20), csrW(0x344, 6, 0),   // mip.STIP=1
-        jal0                               // loop in M
-      ) ++ Seq.fill(8)(nop)
-      loadProg(dut, prog)
-      run(dut, 60)
-      // delegated STIP while in M must NOT trap down to S -> priv stays M
-      assert(dut.io.privLevel.peek().litValue == Privilege.M)
-    }
-  }
-
-  it should "M-mediated STIP reaches S handler when running in S" in {
-    test(new SystemCore(imemDepthWords = 128, dmemSizeBytes = 4096)) { dut =>
-      // Full path: M sets mideleg.STIP, mie.STIE, mip.STIP, sstatus.SIE,
-      // stvec=0xC0, then mret->S. In S, delegated STIP fires -> S handler.
-      // MPP=S(0x800), mepc=S_entry=0x40, sstatus.SIE via mstatus bit1=0x2
-      // mstatus = MIE(0x8)|MPP=S(0x800)|SIE-view bit1(0x2) = 0x80A
-      val prog = Seq(
-        li(6, 0xC0), csrW(0x105, 6, 0),   // stvec=0xC0
-        li(6, 0x20), csrW(0x303, 6, 0),   // mideleg.STIP
-        li(6, 0x20), csrW(0x304, 6, 0),   // mie.STIE
-        li(6, 0x20), csrW(0x344, 6, 0),   // mip.STIP
-        li(6, 0x80A & 0xFFF),             // 0x80A -> li gives 0x80A? imm 12-bit signed: 0x80A=2058 ok positive
-        csrW(0x300, 6, 0),                // mstatus=0x80A (MIE|MPP=S|SIE)
-        li(6, 0x40), csrW(0x341, 6, 0),   // mepc=0x40
-        mret                               // -> S at 0x40
-      ) ++ Seq.fill(32 - 9)(nop) ++        // pad to idx32? need 0x40=idx16
-      Seq(nop) // placeholder fixed below
-      loadProg(dut, prog)
-      run(dut, 80)
-      assert(true)
-    }
-  }
-
-  it should "vectored mtvec computes BASE+4*cause for interrupts" in {
-    test(new SystemCore(imemDepthWords = 128, dmemSizeBytes = 4096)) { dut =>
-      // mtvec mode=01 (vectored): mtvec = BASE | 1. STIP cause=5 -> target=BASE+20
-      // Set mtvec=0x81 (BASE=0x80,vectored), mie.STIE, mstatus.MIE, mip.STIP
-      // interrupt cause 5 -> vector = 0x80 + 4*5 = 0x94 = idx37
-      val setup = Seq(
-        li(6, 0x81), csrW(0x305, 6, 0),   // mtvec vectored base 0x80
-        li(6, 0x20), csrW(0x304, 6, 0),   // mie.STIE
-        li(6, 0x08), csrW(0x300, 6, 0),   // mstatus.MIE (MPP=0 -> but we stay M, no mret)
-        li(6, 0x20), csrW(0x344, 6, 0),   // mip.STIP
-        jal0
-      )
-      // pad so that idx37 (pc 0x94) = handler; fill 0x80..0x93 with distinct nops
-      val prog = (setup ++ Seq.fill(37 - setup.size)(nop)) ++
-        Seq(csrR(0x342, 0, 5), jal0) ++ Seq.fill(8)(nop)
-      loadProg(dut, prog)
-      run(dut, 80)
-      assert(dut.io.privLevel.peek().litValue == Privilege.M)
-    }
-  }
-
-  it should "sync exception wins over simultaneous pending interrupt" in {
-    test(new SystemCore(imemDepthWords = 128, dmemSizeBytes = 4096)) { dut =>
-      // pending STIP interrupt + illegal instruction in same window
-      // illegal should trap cause=2, interrupt stays pending
-      val prog = Seq(
+      val body = Seq(
+        li(6, 0x20), csrW(0x303, 6, 0),   // mideleg.STIP=1 -> S target
         li(6, 0x20), csrW(0x304, 6, 0),   // mie.STIE
         li(6, 0x08), csrW(0x300, 6, 0),   // mstatus.MIE
         li(6, 0x20), csrW(0x344, 6, 0),   // mip.STIP pending
-        BigInt("FFFFFFFF", 16),            // illegal -> sync exception
-        nop, nop, nop
+        jal0                               // loop in M forever
       )
-      loadProg(dut, prog)
-      run(dut, 40)
+      val updates = Seq((48, csrR(0x142, 0, 7))) ++  // S-handler marker (should NOT run)
+                     body.zipWithIndex.map { case (w, i) => (i, w) }
+      loadSafe(dut, 64, updates)
+      val cs = captureCommits(dut, 120)
+      // No trap should fire: no scause/mcause interrupt write to x5/x7, priv stays M
       assert(dut.io.privLevel.peek().litValue == Privilege.M)
+      assert(!rdWrites(cs, 7).contains(BigInt("80000005", 16))) // S handler never ran
+      assert(!rdWrites(cs, 5).contains(BigInt("80000005", 16)))
+    }
+  }
+
+  it should "delegated STIP traps U->S and writes sepc/scause" in {
+    test(new SystemCore(imemDepthWords = 128, dmemSizeBytes = 4096)) { dut =>
+      // M sets up delegation + stvec, drops to U via mret(MPP=U). In U, the
+      // delegated STIP (S-target) preempts regardless of SIE -> S handler.
+      // mstatus: MIE(0x8)|MPP=U(0x0)|SIE-view bit1(0x2) -> after mret U runs.
+      // stvec=0xC0 handler reads scause->x5, sepc->x6.
+      val body = Seq(
+        li(6, 0xC0), csrW(0x105, 6, 0),   // stvec=0xC0
+        li(6, 0x20), csrW(0x303, 6, 0),   // mideleg.STIP
+        li(6, 0x20), csrW(0x304, 6, 0),   // mie.STIE
+        li(6, 0x20), csrW(0x344, 6, 0),   // mip.STIP pending
+        li(6, 0x00A), csrW(0x300, 6, 0),   // mstatus: MIE|SIEview, MPP=U(0)
+        li(6, 0x48), csrW(0x341, 6, 0),   // mepc=0x48 (U resume point)
+        mret,                              // -> U at 0x48
+        nop                               // @0x48 U entry (idx18)
+      )
+      val updates = Seq(
+        (48, csrR(0x142, 0, 5)),          // S handler @0xC0: scause->x5
+        (49, csrR(0x141, 0, 6)),          // sepc->x6
+        (50, jal0), (51, jal0)
+      ) ++ body.zipWithIndex.map { case (w, i) => (i, w) }
+      loadSafe(dut, 64, updates)
+      val cs = captureCommits(dut, 200)
+      assert(rdWrites(cs, 5).contains(BigInt("80000005", 16))) // scause=STIP|INT
+      val sepc = rdWrites(cs, 6).lastOption.map(_.toLong & 0xffffffffL).getOrElse(-1L)
+      // sepc = next unretired PC at the WB boundary where the delegated
+      // interrupt was accepted; must be a 4-aligned in-image address.
+      assert(sepc >= 0x30 && sepc <= 0x60 && (sepc % 4) == 0)
+      assert(dut.io.privLevel.peek().litValue == Privilege.S)
+    }
+  }
+
+  it should "vectored mtvec interrupt targets BASE+4*cause" in {
+    test(new SystemCore(imemDepthWords = 128, dmemSizeBytes = 4096)) { dut =>
+      // STIP cause=5, vectored mtvec=0x81 -> vector = 0x80 + 4*5 = 0x94 (idx37)
+      val body = Seq(
+        li(6, 0x81), csrW(0x305, 6, 0),   // mtvec = BASE 0x80 | MODE=1 (vectored)
+        li(6, 0x20), csrW(0x304, 6, 0),   // mie.STIE
+        li(6, 0x08), csrW(0x300, 6, 0),   // mstatus.MIE
+        li(6, 0x20), csrW(0x344, 6, 0)    // mip.STIP pending
+      )
+      // pad vector region 0x80..0x93 (idx32..36) with nop, handler at idx37
+      val vecRegion = (32 to 36).map(i => (i, nop)) :+ (37, csrR(0x342, 0, 5)) :+ (38, jal0)
+      val updates2 = vecRegion ++ body.zipWithIndex.map { case (w, i) => (i, w) }
+      loadSafe(dut, 64, updates2)
+      val cs = captureCommits(dut, 160)
+      // vectored target 0x94=idx37 ran csrrs mcause->x5 -> proves BASE+4*5 reached
+      assert(rdWrites(cs, 5).contains(BigInt("80000005", 16)))
+      assert(dut.io.privLevel.peek().litValue == Privilege.M)
+    }
+  }
+
+  it should "synchronous exception wins over simultaneous pending interrupt" in {
+    test(new SystemCore(imemDepthWords = 128, dmemSizeBytes = 4096)) { dut =>
+      // pending STIP + illegal instr same window -> illegal (cause=2) wins,
+      // interrupt remains pending for later.
+      val body = Seq(
+        li(6, 0x80), csrW(0x305, 6, 0),   // mtvec=0x80
+        li(6, 0x20), csrW(0x304, 6, 0),   // mie.STIE
+        li(6, 0x08), csrW(0x300, 6, 0),   // mstatus.MIE
+        li(6, 0x20), csrW(0x344, 6, 0),   // mip.STIP pending
+        BigInt("FFFFFFFF", 16)            // illegal -> sync exception
+      )
+      val updates = Seq(
+        (32, csrR(0x342, 0, 5)),          // handler: mcause->x5
+        (33, csrR(0x341, 0, 6)),          // mepc->x6
+        (34, jal0), (35, jal0)
+      ) ++ body.zipWithIndex.map { case (w, i) => (i, w) }
+      loadSafe(dut, 64, updates)
+      val cs = captureCommits(dut, 160)
+      // illegal instruction cause=2 captured (sync exception won this cycle)
+      assert(rdWrites(cs, 5).contains(BigInt(2)))
+      val mepc = rdWrites(cs, 6).lastOption.map(_.toLong & 0xffffffffL).getOrElse(-1L)
+      // mepc = the faulting illegal instr pc (idx8 -> pc32=0x20)
+      assert(mepc == 0x20)
     }
   }
 }

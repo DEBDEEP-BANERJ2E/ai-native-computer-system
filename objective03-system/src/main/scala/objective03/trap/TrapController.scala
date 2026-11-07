@@ -95,10 +95,15 @@ class TrapController extends Module {
     (TrapCause.SSIP, TrapCause.SSIP), (TrapCause.STIP, TrapCause.STIP))
 
   // takeable_i and targetPriv_i per candidate; select highest-priority takeable.
-  var bestCause = 0.U(32.W)
-  var bestTarget = Privilege.M.U(2.W)
-  var anyTake = false.B
-  cands.foreach { case (bit, cause) =>
+  // Iterate LOWEST priority first so a later (higher-priority) takeable
+  // candidate overwrites the selection.
+  val bestCause   = Wire(UInt(32.W))
+  val bestTarget  = Wire(UInt(2.W))
+  val anyTake     = Wire(Bool())
+  bestCause  := 0.U
+  bestTarget := Privilege.M.U(2.W)
+  anyTake    := false.B
+  cands.reverse.foreach { case (bit, cause) =>
     val pend = irqPend(bit)
     val deleg = irqDeleg(bit)
     val target = Mux(deleg, Privilege.S.U(2.W), Privilege.M.U(2.W))
@@ -107,8 +112,7 @@ class TrapController extends Module {
     val belowTarget = privNum < tgtNum          // U(0)<S(1)<M(3)
     val atTargetIE  = (privNum === tgtNum) && curGlobalIE
     val takeable = pend && io.intrQualify && (belowTarget || atTargetIE)
-    // higher priority wins: update only if nothing taken yet at higher prio
-    when(takeable && !anyTake) {
+    when(takeable) {
       bestCause  := cause.U(32.W)
       bestTarget := target
       anyTake    := true.B
@@ -153,10 +157,11 @@ class TrapController extends Module {
 
   io.trapTaken := trapFire
 
-  // Vector: vectored mode (bit0=1) -> base + 4*cause; else base
+  // Vector: MODE==1 (vectored) -> base + 4*cause for INTERRUPTS only;
+  // synchronous exceptions ALWAYS target BASE regardless of MODE.
+  // MODE 0 direct -> base; MODE 2/3 reserved -> AN32 defines as direct.
   val base = Mux(toSupervisor, io.stvec, io.mtvec)
-  val vectored = base(0)
-  val vecIndex = Mux(isIntrWin, selectedIntrCause, exc.cause)
-  io.trapVector := Mux(vectored, (base & "hFFFFFFFC".U) + (vecIndex << 2.U),
-                       base & "hFFFFFFFC".U)
+  val vectoredIntr = (base(1, 0) === 1.U) && isIntrWin
+  io.trapVector := (base & "hFFFFFFFC".U) +
+                   Mux(vectoredIntr, selectedIntrCause << 2.U, 0.U)
 }

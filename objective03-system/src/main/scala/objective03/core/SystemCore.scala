@@ -177,22 +177,32 @@ class SystemCore(
 
   divRem.io.kill    := (takePreciseTrap || takeSysTrap) || (takeTrapReturn || takeSysReturn)
 
+  // FENCE.I retirement: when the WB instruction is fence.i, squash all
+  // younger prefetched stages (IF/ID/EX/MEM) and restart fetch at the
+  // instruction after the fence, so no stale prefetched instruction can
+  // execute after a runtime instruction-memory modification.
+  val fenceIRetire = memWbReg.io.out.valid && sysMemWb.io.out.valid &&
+                     sysMemWb.io.out.isFenceI
+  val fenceINextPc  = memWbReg.io.out.pcPlus4
+
   val stallIF   = hazardUnit.io.stallIF || divHold
   val stallID   = hazardUnit.io.stallID || divHold
   val flushIFID = hazardUnit.io.flushIFID || takePreciseTrap || takeSysTrap ||
-                  takeTrapReturn || takeSysReturn
+                  takeTrapReturn || takeSysReturn || fenceIRetire
   val flushIDEX = hazardUnit.io.flushIDEX || takePreciseTrap || takeSysTrap ||
-                  takeTrapReturn || takeSysReturn
-  val flushEXMEM= takePreciseTrap || takeSysTrap || takeTrapReturn || takeSysReturn
+                  takeTrapReturn || takeSysReturn || fenceIRetire
+  val flushEXMEM= takePreciseTrap || takeSysTrap || takeTrapReturn ||
+                  takeSysReturn || fenceIRetire
 
-  // PC redirect: precise traps > trap/sys returns > branch
+  // PC redirect: precise traps > trap/sys returns > FENCE.I > branch
   val pcRedirectTaken  = takePreciseTrap || takeSysTrap || takeTrapReturn ||
-                        takeSysReturn || branchTakenW
+                        takeSysReturn || fenceIRetire || branchTakenW
   val pcRedirectTarget = Mux(takePreciseTrap, systemMMIO.io.trapVector,
                        Mux(takeSysTrap, trapCtrl.io.trapVector,
                        Mux(takeTrapReturn, systemMMIO.io.trapEpc,
                        Mux(takeSysReturn, sysReturnTarget,
-                            redirectTargetW))))
+                       Mux(fenceIRetire, fenceINextPc,
+                            redirectTargetW)))))
 
   pc.io.stall            := stallIF
   pc.io.jumpBranchTaken  := pcRedirectTaken
@@ -259,6 +269,8 @@ class SystemCore(
   sysIdExIn.isSfenceVma := sysDecCtrl.isSfenceVma
   sysIdExIn.isFenceI    := sysDecCtrl.isFenceI
   sysIdExIn.isFence     := sysDecCtrl.isFence
+  // nextPc is resolved at EX (bju) into sysExMem; ID default is pc+4.
+  sysIdExIn.nextPc      := ifIdReg.io.out.pcPlus4
   sysIdExIn.sfenceRs1   := sysDecCtrl.sfenceRs1
   sysIdExIn.sfenceRs2   := sysDecCtrl.sfenceRs2
   sysIdExIn.isSys       := sysDecCtrl.sysOp =/= SysOp.NONE || sysDecCtrl.isEcall ||
@@ -474,6 +486,9 @@ class SystemCore(
   // Imm forms keep the zimm captured at ID; reg forms take forwardedRs1.
   sysExMem.io.in.csrData := Mux(sysIdEx.io.out.csrIsImm,
                                 sysIdEx.io.out.csrData, forwardedRs1)
+  // Architectural next-PC for interrupt EPC: resolved control-flow target
+  // when the EX instruction is a taken branch/JAL/JALR, else pc+4.
+  sysExMem.io.in.nextPc := Mux(branchTakenW, redirectTargetW, exPcPlus4)
 
   // =========================================================================
   // 6. MEM stage — capability auth + system trap events + MMIO/timer
@@ -521,14 +536,30 @@ class SystemCore(
                   Mux(csrFile.io.privLevel === Privilege.S.U(2.W), TrapCause.ECALL_S.U,
                       TrapCause.ECALL_M.U))
 
+  // Privileged-instruction legality (executed at current privilege):
+  //   MRET       : M only
+  //   SRET       : S or M; in S, mstatus.TSR=1 -> illegal
+  //   SFENCE.VMA : S or M; in S, mstatus.TVM=1 -> illegal
+  // Violations raise illegal-instruction (cause=2) like any bad encoding.
+  val curPrivM = csrFile.io.privLevel === Privilege.M.U(2.W)
+  val curPrivS = csrFile.io.privLevel === Privilege.S.U(2.W)
+  val curPrivU = csrFile.io.privLevel === Privilege.U.U(2.W)
+  val mstatusTsr = csrFile.io.mstatusOut(MstatusBits.TSR)
+  val mstatusTvm = csrFile.io.mstatusOut(MstatusBits.TVM)
+  val mretIllegal   = sysExMemOut.isMret && !curPrivM
+  val sretIllegal   = sysExMemOut.isSret && (curPrivU || (curPrivS && mstatusTsr))
+  val sfenceIllegal = sysExMemOut.isSfenceVma && (curPrivU || (curPrivS && mstatusTvm))
+  val sysPrivIllegal = mretIllegal || sretIllegal || sfenceIllegal
+
   val sysExcValid = memValid && sysExMemOut.valid &&
-    (sysExMemOut.isEcall || sysExMemOut.isEbreak ||
+    (sysExMemOut.isEcall || sysExMemOut.isEbreak || sysPrivIllegal ||
      exMemReg.io.out.illegalInstruction || csrIllegalAtMem)
 
-  val sysExcCause = Mux(exMemReg.io.out.illegalInstruction || csrIllegalAtMem,
+  val isIllegalCause = exMemReg.io.out.illegalInstruction || csrIllegalAtMem || sysPrivIllegal
+  val sysExcCause = Mux(isIllegalCause,
                     TrapCause.ILLEGAL_INSTRUCTION.U,
                     Mux(sysExMemOut.isEbreak, TrapCause.BREAKPOINT.U, ecallCause))
-  val sysExcTval  = Mux(exMemReg.io.out.illegalInstruction || csrIllegalAtMem,
+  val sysExcTval  = Mux(isIllegalCause,
                     memInstruction, 0.U)
 
   val sysTrapEvent = Wire(new TrapEventBundle)
@@ -553,7 +584,11 @@ class SystemCore(
   trapCtrl.io.sie            := csrFile.io.sieViewOut
   trapCtrl.io.mtipExt        := timer.io.mtip
   trapCtrl.io.stipExt        := false.B // STIP is software-set via mip.STIP
-  trapCtrl.io.curPc          := wbPcPlus4W
+  // Interrupt EPC = the WB instruction's architectural successor: resolved
+  // branch/jump target for taken control flow, else pc+4 (carried in sideband).
+  val wbNextPc = Mux(memWbReg.io.out.valid && sysMemWb.io.out.valid,
+                     sysMemWb.io.out.nextPc, wbPcPlus4W)
+  trapCtrl.io.curPc          := wbNextPc
   trapCtrl.io.intrQualify    := memWbReg.io.out.valid // interrupts only at WB retirement boundary
 
   // trapCtrl.trapTaken covers BOTH the synchronous exception (from

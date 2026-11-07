@@ -32,6 +32,10 @@ class SystemPipeBundle extends Bundle {
   val sfenceRs1   = UInt(5.W)
   val sfenceRs2   = UInt(5.W)
   val isSys       = Bool()      // any system instruction (serialization marker)
+  // Architectural next-PC after this instruction retires: resolved branch/
+  // jump target when control flow is taken, else pc+4. Captured at EX (where
+  // bju resolves) and carried to WB for precise interrupt EPC.
+  val nextPc      = UInt(32.W)
 }
 
 object SystemPipe {
@@ -53,6 +57,7 @@ object SystemPipe {
     b.sfenceRs1   := 0.U
     b.sfenceRs2   := 0.U
     b.isSys       := false.B
+    b.nextPc      := 0.U
     b
   }
 }
