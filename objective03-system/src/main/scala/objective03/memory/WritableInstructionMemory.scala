@@ -27,7 +27,7 @@ class WritableInstructionMemory(val depthWords: Int = 4096) extends Module {
 
   val mem = RegInit(VecInit(Seq.fill(depthWords)(0.U(32.W))))
 
-  val wordIndex = io.address(31, 2)
+  val wordIndex = io.address >> 2
   val inBounds  = wordIndex < depthWords.U
 
   // Combinational fetch with NOP default (matches Bare-v1 semantics)
@@ -35,8 +35,9 @@ class WritableInstructionMemory(val depthWords: Int = 4096) extends Module {
   io.instruction := Mux(inBounds, mem(wordIndex), NOP)
 
   // Synchronous write port
-  when(io.loadEn && (io.loadAddr(31, 2) < depthWords.U)) {
-    mem(io.loadAddr(31, 2)) := io.loadData
+  val loadIndex = io.loadAddr >> 2
+  when(io.loadEn && (loadIndex < depthWords.U)) {
+    mem(loadIndex) := io.loadData
   }
   io.loadDone := io.loadEn
 }

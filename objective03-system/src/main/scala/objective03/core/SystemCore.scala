@@ -244,7 +244,9 @@ class SystemCore(
   // System sideband ID->EX: capture decoded metadata + resolved CSR data
   val sysIsCsrOp = sysDecCtrl.sysOp =/= SysOp.NONE
   val sysIdExIn = Wire(new SystemPipeBundle)
-  sysIdExIn.valid       := idValid && !flushIDEX && (sysDecCtrl.base.illegalInstruction === false.B)
+  // Sideband must stay valid for illegal instructions too: they
+  // still reach MEM to raise the synchronous illegal-instruction trap.
+  sysIdExIn.valid       := idValid && !flushIDEX
   sysIdExIn.sysOp       := sysDecCtrl.sysOp
   sysIdExIn.csrAddr     := sysDecCtrl.csrAddr
   sysIdExIn.csrWrite    := sysDecCtrl.csrWrite
