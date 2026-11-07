@@ -185,11 +185,36 @@ class SystemCore(
                      sysMemWb.io.out.isFenceI
   val fenceINextPc  = memWbReg.io.out.pcPlus4
 
-  val stallIF   = hazardUnit.io.stallIF || divHold
-  val stallID   = hazardUnit.io.stallID || divHold
+  // CSR read-use interlock (System-v1 erratum fix):
+  // A CSR instruction's rd is produced only at WB (csrReadData -> wbDataW),
+  // never as an EX/MEM aluResult. If the ID-stage instruction consumes that
+  // rd, it would reach EX one cycle too early and latch a stale forwarded
+  // value. Detect the dependency and apply the same stall/bubble as a
+  // load-use hazard so the consumer waits until the CSR result is in WB and
+  // the existing WB->EX forwarding delivers it.
+  val exCsrProducer = idExReg.io.out.valid && sysIdEx.io.out.valid &&
+    sysIdEx.io.out.sysOp >= 1.U && sysIdEx.io.out.sysOp <= 6.U &&
+    idExReg.io.out.controls.regWrite && (idExReg.io.out.rd =/= 0.U)
+
+  // Does the ID instruction read producer.rd? Integer rs1/rs2 uses, plus the
+  // CSR register-form ops (CSRRW/CSRRS/CSRRC) which source rs1 as write data.
+  val decSysOp       = decoder.io.controls.sysOp
+  val idIsCsr       = decSysOp >= 1.U && decSysOp <= 6.U
+  val idCsrRegForm  = decSysOp <= 3.U
+  val idReadsRs1    = (decoder.io.rs1 =/= 0.U) &&
+    (decoder.io.controls.base.usesIntRs1 || (idIsCsr && idCsrRegForm))
+  val idReadsRs2    = (decoder.io.rs2 =/= 0.U) &&
+    decoder.io.controls.base.usesIntRs2
+  val csrReadUseHazard = exCsrProducer &&
+    ((idReadsRs1 && (decoder.io.rs1 === idExReg.io.out.rd)) ||
+     (idReadsRs2 && (decoder.io.rs2 === idExReg.io.out.rd)))
+
+  val stallIF   = hazardUnit.io.stallIF || divHold || csrReadUseHazard
+  val stallID   = hazardUnit.io.stallID || divHold || csrReadUseHazard
   val flushIFID = hazardUnit.io.flushIFID || takePreciseTrap || takeSysTrap ||
                   takeTrapReturn || takeSysReturn || fenceIRetire
-  val flushIDEX = hazardUnit.io.flushIDEX || takePreciseTrap || takeSysTrap ||
+  val flushIDEX = hazardUnit.io.flushIDEX || csrReadUseHazard ||
+                  takePreciseTrap || takeSysTrap ||
                   takeTrapReturn || takeSysReturn || fenceIRetire
   val flushEXMEM= takePreciseTrap || takeSysTrap || takeTrapReturn ||
                   takeSysReturn || fenceIRetire

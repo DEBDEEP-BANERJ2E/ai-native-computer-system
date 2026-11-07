@@ -19,6 +19,7 @@ class KernelBootSpec extends AnyFlatSpec with ChiselScalatestTester {
   def li(rd:Int,imm:Int)=BigInt(imm&0xFFF)<<20|BigInt(rd)<<7|0x13
   def lui(rd:Int,imm20:Int)=BigInt(imm20&0xFFFFF)<<12|BigInt(rd)<<7|0x37
   def addi(rd:Int,rs1:Int,imm:Int)=BigInt(imm&0xFFF)<<20|BigInt(rs1)<<15|BigInt(rd)<<7|0x13
+  def addR(rd:Int,rs1:Int,rs2:Int)=BigInt(rs2)<<20|BigInt(rs1)<<15|BigInt(rd)<<7|0x33
   def nop:BigInt=0x13
   def jal0:BigInt=BigInt("0000006F",16)
   def mret:BigInt=BigInt("30200073",16)
@@ -100,11 +101,10 @@ class KernelBootSpec extends AnyFlatSpec with ChiselScalatestTester {
         (80,csrR(0x142,0,20)),   // scause -> x20  (expect 8)
         (81,csrR(0x141,0,21)),   // sepc   -> x21  (expect 0x84 = U ecall pc)
         (82,csrR(0x141,0,22)),   // sepc   -> x22  (for modify)
-        (83,nop),(84,nop),(85,nop),  // gap: let x22 reach regfile (CSR fwd gap)
-        (86,addi(22,22,4)),      // x22 = sepc+4
-        (87,csrW(0x141,22,0)),   // sepc = x22
-        (88,sret),               // -> U @ sepc
-        (89,jal0)
+        (83,addi(22,22,4)),      // x22 = sepc+4   (adjacent - interlock handles)
+        (84,csrW(0x141,22,0)),   // sepc = x22
+        (85,sret),               // -> U @ sepc
+        (86,jal0)
       )
       val UProg = Seq(
         (32,li(5,0xAA)),         // marker before ecall
@@ -137,6 +137,34 @@ class KernelBootSpec extends AnyFlatSpec with ChiselScalatestTester {
       assert(rdWrites(cs,5).contains(BigInt(0xBB)))
       // final privilege is U (returned through S)
       assert(dut.io.privLevel.peek().litValue==Privilege.U)
+    }
+  }
+
+  it should "CSR read result forwards to adjacent rs1 and rs2 consumers (RAW interlock)" in {
+    test(new SystemCore(imemDepthWords=128,dmemSizeBytes=4096)){dut=>
+      // mepc=0x100 ; csrrs x10,mepc,x0 -> x10=0x100
+      //   addi x11,x10,1  (rs1 consumer, adjacent) -> 0x101
+      //   add  x12,x13,x10 (rs2 consumer, adjacent) -> x13+0x100
+      // li x13,5 ; li x6,0x100 ; csrw mepc,x6
+      // csrrs x10,mepc,x0 ; addi x11,x10,1 ; add x12,x13,x10 ; jal0
+      val prog=Seq(
+        li(13,5), li(6,0x100), csrW(0x341,6,0),
+        csrR(0x341,0,10),      // csrrs x10,mepc,x0
+        addi(11,10,1),         // adjacent rs1 use
+        addR(12,13,10),        // adjacent rs2 use
+        jal0
+      )
+      // ordered load: program is self-contained safe (no traps), load in order
+      prog.zipWithIndex.foreach{case(w,i)=>
+        dut.io.imemLoadAddr.poke((i*4).U); dut.io.imemLoadData.poke(w.U)
+        dut.io.imemLoadEn.poke(true.B); dut.clock.step(1)
+      }
+      dut.io.imemLoadEn.poke(false.B)
+      dut.io.imemLoadAddr.poke(0.U); dut.io.imemLoadData.poke(0.U)
+      val cs=captureCommits(dut,80)
+      assert(rdWrites(cs,10).contains(BigInt(0x100)))   // x10=mepc=0x100
+      assert(rdWrites(cs,11).contains(BigInt(0x101)))   // x11=0x100+1 (rs1 fwd)
+      assert(rdWrites(cs,12).contains(BigInt(0x105)))   // x12=5+0x100 (rs2 fwd)
     }
   }
 }
