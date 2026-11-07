@@ -20,7 +20,8 @@ class SystemPipeBundle extends Bundle {
   val sysOp       = UInt(4.W)  // SysOp.* (0 = not a system op)
   val csrAddr     = UInt(12.W)
   val csrWrite    = Bool()      // architectural write intent
-  val csrData     = UInt(32.W)  // rs1 value or zimm (resolved at ID)
+  val csrData     = UInt(32.W)  // rs1 value or zimm
+  val csrIsImm    = Bool()      // true => csrData is zimm (no forwarding needed)
   val isEcall     = Bool()
   val isEbreak    = Bool()
   val isMret      = Bool()
@@ -41,6 +42,7 @@ object SystemPipe {
     b.csrAddr     := 0.U
     b.csrWrite    := false.B
     b.csrData     := 0.U
+    b.csrIsImm    := false.B
     b.isEcall     := false.B
     b.isEbreak    := false.B
     b.isMret      := false.B

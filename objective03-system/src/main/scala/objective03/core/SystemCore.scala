@@ -251,6 +251,7 @@ class SystemCore(
   sysIdExIn.csrAddr     := sysDecCtrl.csrAddr
   sysIdExIn.csrWrite    := sysDecCtrl.csrWrite
   sysIdExIn.csrData     := sysDecCtrl.csrRs1Data
+  sysIdExIn.csrIsImm    := sysDecCtrl.sysOp === SysOp.CSRRWI || sysDecCtrl.sysOp === SysOp.CSRRSI || sysDecCtrl.sysOp === SysOp.CSRRCI
   sysIdExIn.isEcall     := sysDecCtrl.isEcall
   sysIdExIn.isEbreak    := sysDecCtrl.isEbreak
   sysIdExIn.isMret      := sysDecCtrl.isMret
@@ -469,6 +470,10 @@ class SystemCore(
   sysExMem.io.stall := false.B
   sysExMem.io.flush := flushEXMEM
   sysExMem.io.in    := sysIdEx.io.out
+  // Resolve CSR rs1 operand with full EX-stage forwarding (WB/EX/MEM).
+  // Imm forms keep the zimm captured at ID; reg forms take forwardedRs1.
+  sysExMem.io.in.csrData := Mux(sysIdEx.io.out.csrIsImm,
+                                sysIdEx.io.out.csrData, forwardedRs1)
 
   // =========================================================================
   // 6. MEM stage — capability auth + system trap events + MMIO/timer
@@ -557,11 +562,10 @@ class SystemCore(
   takeSysTrap := trapCtrl.io.trapTaken
   val sysTrapIsInterrupt = trapCtrl.io.trapTaken && !sysTrapEvent.valid
 
-  // MRET/SRET at MEM: flush + redirect + trapReturn
-  val isMretAtMem = memValid && sysExMemOut.isMret
-  val isSretAtMem = memValid && sysExMemOut.isSret
-  takeSysReturn := isMretAtMem || isSretAtMem
-  sysReturnTarget := Mux(isMretAtMem, csrFile.io.mepcOut, csrFile.io.sepcOut)
+  // MRET/SRET are detected at the WB retirement boundary (sysWb), NOT at
+  // MEM: trapReturn reads mstatus/mie/mip, and a CSR write in WB must have
+  // already committed or MRET/SRET would observe stale privilege state.
+  // (sysWb is declared in the WB section below; forward-declared here.)
 
   // ---- MMIO: SystemMMIO + TimerBlock share 0x8000xxxx ----
   systemMMIO.io.address     := exMemReg.io.out.aluResult
@@ -593,8 +597,7 @@ class SystemCore(
   // trapEntry: driven for BOTH sync exceptions (epc=memPc) and interrupts
   // (epc=wbPcPlus4). TrapController already selected targetPriv/vector.
   csrFile.io.trapEntry := trapCtrl.io.trapEntry
-  csrFile.io.trapReturn.valid := takeSysReturn
-  csrFile.io.trapReturn.toM   := isMretAtMem
+  // trapReturn is driven at the WB boundary below (after sysWb is available)
 
   // Interrupt vs exception redirect target: exceptions use trapCtrl vector
   // (already correct); interrupts also use trapCtrl vector. takeSysTrap
@@ -646,8 +649,16 @@ class SystemCore(
   // some contexts; these are combinationally resolved)
   // wbDataW / wbRdW / wbRegWriteW defined below — see note at bottom.
 
-  // ---- CSR commit at WB (single retirement point => program order) ----
+  // ---- MRET/SRET at WB retirement boundary ----
   val sysWb = sysMemWb.io.out
+  val isMretAtWb = wbValid && sysWb.valid && sysWb.isMret
+  val isSretAtWb = wbValid && sysWb.valid && sysWb.isSret
+  takeSysReturn := isMretAtWb || isSretAtWb
+  sysReturnTarget := Mux(isMretAtWb, csrFile.io.mepcOut, csrFile.io.sepcOut)
+  csrFile.io.trapReturn.valid := takeSysReturn
+  csrFile.io.trapReturn.toM   := isMretAtWb
+
+  // ---- CSR commit at WB (single retirement point => program order) ----
   val wbIsCsr = wbValid && sysWb.valid && sysWb.sysOp =/= SysOp.NONE
 
   // accessType: WRITE for CSRRW/I, SET for CSRRS/I, CLEAR for CSRRC/I;
