@@ -72,7 +72,15 @@ std::optional<an32::Mnemonic> lookup_mnemonic(std::string_view name) {
         {"csrrc",  an32::Mnemonic::CSRRC},
         {"csrrwi", an32::Mnemonic::CSRRWI},
         {"csrrsi", an32::Mnemonic::CSRRSI},
-        {"csrrci", an32::Mnemonic::CSRRCI}
+        {"csrrci", an32::Mnemonic::CSRRCI},
+
+        // System-v1 fixed-field and fence instructions
+        {"ecall",      an32::Mnemonic::ECALL},
+        {"ebreak",     an32::Mnemonic::EBREAK},
+        {"mret",       an32::Mnemonic::MRET},
+        {"sret",       an32::Mnemonic::SRET},
+        {"fence.i",    an32::Mnemonic::FENCE_I},
+        {"sfence.vma", an32::Mnemonic::SFENCE_VMA}
     };
 
     auto it = mnem_map.find(lower);
@@ -995,6 +1003,33 @@ void Assembler::encode_instructions(SectionTable& sec_table, SymbolTable& symtab
                             }
                         }
                     }
+                }
+            }
+            // System-v1 fixed-field instructions: ecall/ebreak/mret/sret/fence.i
+            // The descriptor match_val is the complete fixed 32-bit encoding
+            // (mask_val == 0xFFFFFFFF for SYSTEM_FIXED).
+            else if (an32::get_instruction_descriptor(m).format == an32::InstructionFormat::SYSTEM_FIXED) {
+                if (ops.empty()) {
+                    word = an32::get_instruction_descriptor(m).match_val;
+                } else {
+                    diag_.error(sp, "fixed system instruction takes no operands");
+                }
+            }
+            // System-v1 SYSTEM_R: sfence.vma rs1, rs2
+            else if (m == an32::Mnemonic::SFENCE_VMA) {
+                if (ops.size() >= 2) {
+                    auto rs1 = get_xreg(ops[0], sp);
+                    auto rs2 = get_xreg(ops[1], sp);
+                    if (rs1 && rs2) {
+                        const auto& d = an32::get_instruction_descriptor(m);
+                        word = (d.opcode & 0x7F) |
+                               ((d.funct3 & 0x7) << 12) |
+                               ((rs1->index & 0x1F) << 15) |
+                               ((rs2->index & 0x1F) << 20) |
+                               ((d.funct7 & 0x7F) << 25);
+                    }
+                } else {
+                    diag_.error(sp, "sfence.vma requires 2 operands: rs1, rs2");
                 }
             }
             // System-v1 CSR register forms: csrrw/csrrs/csrrc rd, csr, rs1
