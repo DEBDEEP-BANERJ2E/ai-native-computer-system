@@ -543,8 +543,18 @@ class SystemCore(
   secEvent.reason     := Mux(isCapMemViolation, capChecker.io.reason, exMemReg.io.out.capViolationReason)
   secEvent.context    := systemMMIO.io.currentContext
 
+  // ---- WB-older vs MEM-younger precise-retirement arbitration ----
+  // An older WB-boundary control retirement (MRET/SRET) or serializing
+  // FENCE.I must squash younger MEM-stage synchronous faults: a younger
+  // illegal/access fault must not become architectural ahead of the older
+  // return/flush. Detected here from the WB sideband.
+  val wbIsReturnEarly    = memWbReg.io.out.valid && sysMemWb.io.out.valid &&
+                          (sysMemWb.io.out.isMret || sysMemWb.io.out.isSret)
+  val wbSerializingRetire = wbIsReturnEarly || fenceIRetire
+
   systemMMIO.io.securityEvent := secEvent
-  takePreciseTrap := secEvent.valid && systemMMIO.io.trapEnable && !systemMMIO.io.trapActive
+  takePreciseTrap := secEvent.valid && systemMMIO.io.trapEnable &&
+                     !systemMMIO.io.trapActive && !wbSerializingRetire
   takeTrapReturn  := systemMMIO.io.takeTrapReturn
 
   // ---- System trap events at MEM (synchronous exceptions) ----
@@ -576,7 +586,7 @@ class SystemCore(
   val sfenceIllegal = sysExMemOut.isSfenceVma && (curPrivU || (curPrivS && mstatusTvm))
   val sysPrivIllegal = mretIllegal || sretIllegal || sfenceIllegal
 
-  val sysExcValid = memValid && sysExMemOut.valid &&
+  val sysExcValid = memValid && sysExMemOut.valid && !wbSerializingRetire &&
     (sysExMemOut.isEcall || sysExMemOut.isEbreak || sysPrivIllegal ||
      exMemReg.io.out.illegalInstruction || csrIllegalAtMem)
 
@@ -614,7 +624,10 @@ class SystemCore(
   val wbNextPc = Mux(memWbReg.io.out.valid && sysMemWb.io.out.valid,
                      sysMemWb.io.out.nextPc, wbPcPlus4W)
   trapCtrl.io.curPc          := wbNextPc
-  trapCtrl.io.intrQualify    := memWbReg.io.out.valid // interrupts only at WB retirement boundary
+  // Inhibit async interrupt acceptance on an xRET retirement cycle so
+  // trapEntry and trapReturn never update mstatus/priv simultaneously;
+  // the interrupt is reconsidered once the new privilege/status is set.
+  trapCtrl.io.intrQualify    := memWbReg.io.out.valid && !wbIsReturnEarly
 
   // trapCtrl.trapTaken covers BOTH the synchronous exception (from
   // sysTrapEvent) and asynchronous interrupts (intrQualify=wbValid). Both
@@ -633,8 +646,6 @@ class SystemCore(
   // memory/MMIO/timer writes. takeSysReturn is computed later; detect it
   // here from the WB sideband so the write enables can be gated.
   val sysWbEarly = sysMemWb.io.out
-  val wbIsReturnEarly = memWbReg.io.out.valid && sysWbEarly.valid &&
-                        (sysWbEarly.isMret || sysWbEarly.isSret)
   val wbMemWriteBlock = takePreciseTrap || takeSysTrap || wbIsReturnEarly || fenceIRetire
 
   // ---- MMIO: SystemMMIO + TimerBlock share 0x8000xxxx ----
