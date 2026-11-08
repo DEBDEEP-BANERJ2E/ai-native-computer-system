@@ -118,8 +118,18 @@ std::unique_ptr<AssemblerObject> Assembler::assemble_string(const std::string& s
     Lexer lexer(sm_, file_id, diag_);
     auto raw_tokens = lexer.tokenize();
 
+    // Resolve .include relative to the including source file's directory
+    // first, then the explicit -I paths / ".".
+    auto inc_paths = options_.include_paths;
+    {
+        const auto slash = filename.find_last_of('/');
+        if (slash != std::string::npos) {
+            inc_paths.insert(inc_paths.begin(), filename.substr(0, slash));
+        }
+    }
+
     // 2. Token-Aware Macro & Source Expansion
-    SourceExpander expander(sm_, diag_, options_.include_paths);
+    SourceExpander expander(sm_, diag_, inc_paths);
     auto expanded_tokens = expander.expand(raw_tokens);
 
     // 3. Parsing into AST
@@ -393,15 +403,26 @@ void Assembler::process_statements(const std::vector<StatementPtr>& stmts, Secti
                 continue;
             }
             if (d->directive_type == TokenType::DIR_EQU || d->directive_type == TokenType::DIR_SET) {
-                if (!d->symbol_arg.empty() && !d->expr_args.empty()) {
-                    auto val = eval.evaluate_absolute(d->expr_args[0], &symtab);
-                    if (val.has_value()) {
-                        auto* sym = symtab.get_or_create(d->symbol_arg);
-                        sym->is_defined = true;
-                        sym->is_absolute = true;
-                        sym->value = static_cast<uint64_t>(*val);
+                if (d->symbol_arg.empty() || d->expr_args.empty()) {
+                    diag_.error(d->span, ".equ/.set requires 'NAME, expression'");
+                    continue;
+                }
+                auto val = eval.evaluate_absolute(d->expr_args[0], &symtab);
+                if (!val.has_value()) {
+                    diag_.error(d->span, "could not evaluate absolute expression for '" + d->symbol_arg + "'");
+                    continue;
+                }
+                const bool is_equ = (d->directive_type == TokenType::DIR_EQU);
+                const auto* existing = symtab.find(d->symbol_arg);
+                if (existing && existing->is_defined) {
+                    if (is_equ) {
+                        diag_.error(d->span, "redefinition of equate '" + d->symbol_arg + "' (.equ is immutable; use .set)");
+                        continue;
                     }
                 }
+                auto* sym = symtab.define_symbol(d->symbol_arg, std::nullopt,
+                                                 static_cast<uint64_t>(*val), d->span);
+                sym->is_absolute = true;
                 continue;
             }
             if (d->directive_type == TokenType::DIR_FILE) {

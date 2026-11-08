@@ -15,11 +15,7 @@
 #   u_start ecall -> s_trap_entry[S] -> sret -> u_start (after ecall)
 # =============================================================================
 
-# NOTE: stack addresses use the physical values from memmap.inc/memmap.h.
-# .equ constants are not yet usable as instruction operands in an32-as
-# (equates only feed .if evaluation), so the literals below ARE the memmap
-# values - keep them in sync with memmap.inc until equate-operand support lands.
-#   M_STACK_TOP=0x10000 S_STACK_TOP=0xF000 U_STACK_TOP=0xE000
+.include "memmap.inc"
 
 .text
 .globl _start
@@ -30,7 +26,7 @@
 #   mstatus.MPP=S, mret -> S.
 # -----------------------------------------------------------------------------
 _start:
-    li   sp, 0x10000            # M_STACK_TOP          # M boot stack (dmem)
+    li   sp, M_STACK_TOP
     # M-stack sentinel: prove the M stack region is live.
     li   t0, 0x4D4D4D4D            # 'MMMM'
     sw   t0, -16(sp)
@@ -66,7 +62,7 @@ m_trap_spin:
 #   sepc = u_start, sstatus.SPP = U, sp = U stack, sret -> U.
 # -----------------------------------------------------------------------------
 s_start:
-    li   sp, 0xF000             # S_STACK_TOP          # S kernel stack (dmem)
+    li   sp, S_STACK_TOP
     # S-stack sentinel.
     li   t0, 0x53535353            # 'SSSS'
     sw   t0, -16(sp)
@@ -83,7 +79,7 @@ s_start:
     li   t0, 0x100                # sstatus.SPP bit -> clear => return to U
     csrrc x0, sstatus, t0
 
-    li   sp, 0xE000             # U_STACK_TOP          # hand the user its own stack
+    li   sp, U_STACK_TOP
     sret                          # -> U-mode at u_start
 
 # -----------------------------------------------------------------------------

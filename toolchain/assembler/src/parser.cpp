@@ -322,6 +322,11 @@ StatementPtr Parser::parse_directive() {
                                                     stmt->directive_type == TokenType::DIR_LOCAL ||
                                                     stmt->directive_type == TokenType::DIR_WEAK)) {
             stmt->symbol_arg = advance().text;
+        } else if (check(TokenType::IDENTIFIER) &&
+                   (stmt->directive_type == TokenType::DIR_EQU || stmt->directive_type == TokenType::DIR_SET) &&
+                   stmt->symbol_arg.empty()) {
+            // .equ/.set NAME, expr  -> NAME is the symbol being defined, not an operand
+            stmt->symbol_arg = advance().text;
         } else {
             auto expr = parse_expression();
             if (expr) {
