@@ -86,9 +86,13 @@ class KernelStackSpec extends AnyFlatSpec with ChiselScalatestTester {
     test(new SystemCore(imemDepthWords = 256, dmemSizeBytes = 65536)) { dut =>
       loadImage(dut, words)
 
-      // Completion: U wrote a0=0xBB after ecall AND is in U-mode on U stack.
-      val (ok, regs, trace) = runUntil(dut, 800) { r =>
+      // Completion: U resumed past ecall (a0=0xBB), surfaced KOBS (a7 written),
+      // in U-mode on the U stack.
+      val (ok, regs, trace) = runUntil(dut, 1200) { r =>
         r.getOrElse(10, -1L) == 0xBB &&        // a0 = post-ecall marker
+        r.getOrElse(11, -1L) == 0x0E000L &&   // a1 = KOBS trapped-sp
+        r.getOrElse(16, -1L) == 8L &&          // a6 = KOBS scause (last-but-one load)
+        r.getOrElse(17, -1L) != 0xA11A0011L && // a7 = KOBS sstatus (changed from init)
         dut.io.privLevel.peek().litValue == Privilege.U &&
         r.getOrElse(2, -1L) == 0x0E000L        // sp = U_STACK_TOP
       }
@@ -121,6 +125,26 @@ class KernelStackSpec extends AnyFlatSpec with ChiselScalatestTester {
       // Final state: still in U on the user stack.
       assert(reg(regs, 10) == 0xBB, "post-ecall U marker missing")
       assert(reg(regs, 2)  == 0x0E000L, "sp not on U stack at end")
+
+      // B3: adversarial GPR preservation - every saved reg must survive U->S->U.
+      // (a0-a7 and t0/t1/t2 are legitimately clobbered post-ecall; check the rest.)
+      val preserved = Map(
+        1 -> 0xA11A0001L, 3 -> 0xA11A0003L, 4 -> 0xA11A0004L,   // ra gp tp
+        8 -> 0xA11A0008L, 9 -> 0xA11A0009L,                      // s0 s1
+        18 -> 0xA11A0012L, 27 -> 0xA11A001BL,                    // s2 s11
+        28 -> 0xA11A001CL, 29 -> 0xA11A001DL, 30 -> 0xA11A001EL, 31 -> 0xA11A001FL) // t3-t6
+      preserved.foreach { case (x, exp) =>
+        assert(reg(regs, x) == exp, f"x$x not preserved: got ${reg(regs,x)}%08x want ${exp}%08x")
+      }
+
+      // B3: frame contents surfaced via KOBS -> a1..a7.
+      assert(reg(regs, 11) == 0x0E000L,   s"KOBS trapped-sp wrong: ${reg(regs,11)}%08x")   // a1
+      assert(reg(regs, 12) == 0xA11A0001L, s"KOBS ra wrong: ${reg(regs,12)}%08x")          // a2
+      assert(reg(regs, 13) == 0xA11A0008L, s"KOBS s0 wrong: ${reg(regs,13)}%08x")          // a3
+      assert(reg(regs, 14) == 0x5555AAAAL, s"KOBS t0 wrong: ${reg(regs,14)}%08x")          // a4
+      assert(reg(regs, 16) == 8L,          s"KOBS scause wrong: ${reg(regs,16)}")           // a6
+      // a7 = KOBS sstatus: done-predicate already proved it was loaded ( != init );
+      // sstatus legitimately reads 0 here (SPP=U,SPIE=SIE=0 after U->S trap).
     }
   }
 }

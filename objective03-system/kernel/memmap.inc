@@ -22,3 +22,21 @@
 
 .equ KDATA_BASE,     0x0000C000     # early kernel/trap scratch data
 .equ KDATA_SIZE,     0x00001000
+
+# ---- B3 trap-frame ABI (144 bytes, 16B-aligned) ----
+# Layout: x1..x31 at (N-1)*4, then sepc/sstatus/scause/stval.
+# TF_SP slot holds the TRAPPED user sp (from sscratch), not kernel sp.
+.equ TF_SIZE,    144
+.equ TF_SEPC,    124
+.equ TF_SSTATUS, 128
+.equ TF_SCAUSE,  132
+.equ TF_STVAL,   136
+# KDATA observation area: kernel copies select frame fields here for the test.
+.equ KOBS_BASE,  0x0000C000
+.equ KOBS_SP,    0x0000C000   # trapped user sp
+.equ KOBS_RA,    0x0000C004   # x1
+.equ KOBS_S0,    0x0000C008   # x8 saved reg
+.equ KOBS_T0,    0x0000C00C   # x5 temp
+.equ KOBS_SEPC,  0x0000C010
+.equ KOBS_SCAUSE,0x0000C014
+.equ KOBS_SSTATUS,0x0000C018
