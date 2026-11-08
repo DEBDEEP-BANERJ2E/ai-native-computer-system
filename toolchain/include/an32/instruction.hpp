@@ -20,6 +20,12 @@ struct DecodedInstruction {
     int32_t immediate{0};
     uint8_t shamt{0};
 
+    // SYSTEM_CSR_R / SYSTEM_CSR_I explicit fields.
+    // csr_addr = instruction bits [31:20]; zimm = bits [19:15] for the
+    // immediate CSR forms (not a semantic integer register source).
+    uint16_t csr_addr{0};
+    uint8_t  zimm{0};
+
     bool uses_rd_cap{false};
     bool uses_rs1_cap{false};
     bool uses_rs2_cap{false};

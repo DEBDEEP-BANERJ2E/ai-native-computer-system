@@ -43,6 +43,11 @@ public:
     // CapabilityLite Custom-1 Memory Encoders (OP_CAP_MEM = 0x2B)
     static Result<uint32_t> encode_cap_load(Mnemonic m, XReg rd, CapReg cs1, IImm12 offset) noexcept;
     static Result<uint32_t> encode_cap_store(Mnemonic m, XReg rs2, CapReg cs1, SImm12 offset) noexcept;
+
+    // System-v1 CSR Encoders (OP_SYSTEM = 0x73)
+    // word = csr[31:20] | rs1/zimm[19:15] | funct3[14:12] | rd[11:7] | 0x73
+    static Result<uint32_t> encode_csr_reg(Mnemonic m, XReg rd, uint16_t csr, XReg rs1) noexcept;
+    static Result<uint32_t> encode_csr_imm(Mnemonic m, XReg rd, uint16_t csr, uint8_t zimm) noexcept;
 };
 
 } // namespace an32

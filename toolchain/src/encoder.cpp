@@ -333,4 +333,42 @@ Result<uint32_t> Encoder::encode_cap_store(Mnemonic m, XReg rs2, CapReg cs1, SIm
     return word;
 }
 
+Result<uint32_t> Encoder::encode_csr_reg(Mnemonic m, XReg rd, uint16_t csr, XReg rs1) noexcept {
+    if (!rd.is_valid() || !rs1.is_valid()) {
+        return EncodeError::INVALID_INTEGER_REGISTER;
+    }
+    if (csr > 0xFFF) {
+        return EncodeError::OUT_OF_RANGE_IMMEDIATE;
+    }
+    const auto& desc = get_instruction_descriptor(m);
+    if (desc.format != InstructionFormat::SYSTEM_CSR_R) {
+        return EncodeError::UNSUPPORTED_INSTRUCTION;
+    }
+    uint32_t word = (desc.opcode & 0x7F) |
+                    ((rd.index & 0x1F) << 7) |
+                    ((desc.funct3 & 0x7) << 12) |
+                    ((rs1.index & 0x1F) << 15) |
+                    (static_cast<uint32_t>(csr & 0xFFF) << 20);
+    return word;
+}
+
+Result<uint32_t> Encoder::encode_csr_imm(Mnemonic m, XReg rd, uint16_t csr, uint8_t zimm) noexcept {
+    if (!rd.is_valid()) {
+        return EncodeError::INVALID_INTEGER_REGISTER;
+    }
+    if (csr > 0xFFF || zimm > 31) {
+        return EncodeError::OUT_OF_RANGE_IMMEDIATE;
+    }
+    const auto& desc = get_instruction_descriptor(m);
+    if (desc.format != InstructionFormat::SYSTEM_CSR_I) {
+        return EncodeError::UNSUPPORTED_INSTRUCTION;
+    }
+    uint32_t word = (desc.opcode & 0x7F) |
+                    ((rd.index & 0x1F) << 7) |
+                    ((desc.funct3 & 0x7) << 12) |
+                    (static_cast<uint32_t>(zimm & 0x1F) << 15) |
+                    (static_cast<uint32_t>(csr & 0xFFF) << 20);
+    return word;
+}
+
 } // namespace an32

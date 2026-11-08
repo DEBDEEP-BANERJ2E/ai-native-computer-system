@@ -63,10 +63,16 @@ def compute_match_mask(inst):
         match_val |= (funct3 & 0x7) << 12
         match_val |= (funct7 & 0x7F) << 25
         mask_val  |= (0x7 << 12) | (0x7F << 25) | (0x1F << 7) # rd=0
+    elif fmt in ("SYSTEM_CSR_R", "SYSTEM_CSR_I"):
+        # Only opcode[6:0] and funct3[14:12] are fixed. csr[31:20] is the
+        # variable CSR address and rs1/zimm[19:15] is an operand field, so
+        # neither is masked.
+        match_val |= (funct3 & 0x7) << 12
+        mask_val  |= (0x7 << 12)
 
     return match_val, mask_val
 
-def generate_code(isa_data, abi_data, cap_data):
+def generate_code(isa_data, abi_data, cap_data, csr_data):
     bare_instructions = isa_data.get("instructions", [])
     future_instructions = isa_data.get("future_system_instructions", [])
     all_instructions = bare_instructions + future_instructions
@@ -93,7 +99,7 @@ def generate_code(isa_data, abi_data, cap_data):
     hpp.append("    UNKNOWN_ILLEGAL")
     hpp.append("};\n")
 
-    # Instruction Format Enum (9 Bare-v1 formats + 2 System formats)
+    # Instruction Format Enum (9 Bare-v1 formats + 4 System formats)
     hpp.append("enum class InstructionFormat : uint8_t {")
     hpp.append("    R,")
     hpp.append("    I,")
@@ -105,7 +111,9 @@ def generate_code(isa_data, abi_data, cap_data):
     hpp.append("    CAP_MEM_I,")
     hpp.append("    CAP_MEM_S,")
     hpp.append("    SYSTEM_FIXED,")
-    hpp.append("    SYSTEM_R")
+    hpp.append("    SYSTEM_R,")
+    hpp.append("    SYSTEM_CSR_R,")
+    hpp.append("    SYSTEM_CSR_I")
     hpp.append("};\n")
 
     # Descriptor Struct
@@ -152,6 +160,20 @@ def generate_code(isa_data, abi_data, cap_data):
     hpp.append("std::string_view get_capreg_name(uint8_t reg_idx) noexcept;")
     hpp.append("std::string_view get_capreg_abi_name(uint8_t reg_idx) noexcept;")
     hpp.append("std::optional<uint8_t> lookup_capreg_by_name(std::string_view name) noexcept;\n")
+
+    # CSR namespace helpers
+    hpp.append("// Control & Status Register namespace (System-v1 privileged architecture)")
+    hpp.append("struct CsrDescriptor {")
+    hpp.append("    std::string_view name;")
+    hpp.append("    uint16_t address;")
+    hpp.append("    char privilege;   // 'U', 'S', or 'M' (minimum privilege)")
+    hpp.append("    bool read_only;")
+    hpp.append("    uint8_t width;")
+    hpp.append("};")
+    hpp.append("inline constexpr size_t CSR_COUNT = " + str(len(csr_data.get("csrs", []))) + ";")
+    hpp.append("extern const std::array<CsrDescriptor, CSR_COUNT> CSR_TABLE;")
+    hpp.append("std::optional<uint16_t> lookup_csr_by_name(std::string_view name) noexcept;")
+    hpp.append("std::string_view get_csr_name(uint16_t address) noexcept;\n")
 
     hpp.append("} // namespace an32\n")
 
@@ -340,6 +362,34 @@ def generate_code(isa_data, abi_data, cap_data):
     cpp.append("    return std::nullopt;")
     cpp.append("}\n")
 
+    # CSR namespace table + lookups
+    csrs = csr_data.get("csrs", [])
+    cpp.append("const std::array<CsrDescriptor, CSR_COUNT> CSR_TABLE = {{")
+    for c in csrs:
+        priv = str(c.get("privilege", "M"))[0].upper()
+        ro = "true" if c.get("read_only", False) else "false"
+        width = int(c.get("width", 32))
+        cpp.append(f'    {{ "{c["name"]}", 0x{int(c["address"]):03X}, \'{priv}\', {ro}, {width} }},')
+    cpp.append("}};\n")
+
+    cpp.append("std::optional<uint16_t> lookup_csr_by_name(std::string_view name) noexcept {")
+    cpp.append("    for (const auto& c : CSR_TABLE) {")
+    cpp.append("        if (c.name == name) {")
+    cpp.append("            return c.address;")
+    cpp.append("        }")
+    cpp.append("    }")
+    cpp.append("    return std::nullopt;")
+    cpp.append("}\n")
+
+    cpp.append("std::string_view get_csr_name(uint16_t address) noexcept {")
+    cpp.append("    for (const auto& c : CSR_TABLE) {")
+    cpp.append("        if (c.address == address) {")
+    cpp.append("            return c.name;")
+    cpp.append("        }")
+    cpp.append("    }")
+    cpp.append('    return "<csr>";')
+    cpp.append("}\n")
+
     cpp.append("} // namespace an32\n")
 
     return "\n".join(hpp), "\n".join(cpp)
@@ -355,8 +405,10 @@ def main():
         abi_data = yaml.safe_load(f)
     with open(os.path.join(SPEC_DIR, "capability-abi.yaml"), "r") as f:
         cap_data = yaml.safe_load(f)
+    with open(os.path.join(SPEC_DIR, "csr.yaml"), "r") as f:
+        csr_data = yaml.safe_load(f)
 
-    hpp_content, cpp_content = generate_code(isa_data, abi_data, cap_data)
+    hpp_content, cpp_content = generate_code(isa_data, abi_data, cap_data, csr_data)
 
     hpp_path = os.path.join(INCLUDE_DIR, "isa_generated.hpp")
     cpp_path = os.path.join(SRC_DIR, "isa_generated.cpp")
