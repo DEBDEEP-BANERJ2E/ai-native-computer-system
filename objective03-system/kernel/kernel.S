@@ -88,24 +88,13 @@ s_start:
 #   writes a resume marker and spins.
 # -----------------------------------------------------------------------------
 u_start:
-    # Adversarial: give every writable GPR a distinct recognizable value so
-    # the trap frame must preserve ALL of them across the U->S->U round trip.
+    # Preserve-check init on NON-syscall registers (a0-a5,a7 are the ABI
+    # arg/return regs and legitimately change across ecall).
     li   ra,  0xA11A0001
     li   gp,  0xA11A0003
     li   tp,  0xA11A0004
-    li   t0,  0xA11A0005
-    li   t1,  0xA11A0006
-    li   t2,  0xA11A0007
     li   s0,  0xA11A0008
     li   s1,  0xA11A0009
-    li   a0,  0xA11A000A
-    li   a1,  0xA11A000B
-    li   a2,  0xA11A000C
-    li   a3,  0xA11A000D
-    li   a4,  0xA11A000E
-    li   a5,  0xA11A000F
-    li   a6,  0xA11A0010
-    li   a7,  0xA11A0011
     li   s2,  0xA11A0012
     li   s3,  0xA11A0013
     li   s4,  0xA11A0014
@@ -121,22 +110,36 @@ u_start:
     li   t5,  0xA11A001E
     li   t6,  0xA11A001F
 
-    li   t0, 0x5555AAAA            # U-stack sentinel
-    sw   t0, -16(sp)
-    lw   t1, -16(sp)              # t1 = sentinel (U stack readback)
+    # ---- syscall 1: SYS_GETABI -> a0 = ABI version ----
+    li   a7, SYS_GETABI
+    ecall
+    mv   s1, a0                     # save ABI version for the test
 
-    ecall                         # -> S-mode s_trap_entry (delegated)
+    # ---- syscall 2: SYS_DEBUG_ARGS with six distinct args ----
+    li   a7, SYS_DEBUG_ARGS
+    li   a0, 0x11111111
+    li   a1, 0x22222222
+    li   a2, 0x33333333
+    li   a3, 0x44444444
+    li   a4, 0x55555555
+    li   a5, 0x66666666
+    ecall                          # -> a0 = 6, KARGS_BASE[0..5] = args
 
-    li   a0, 0xBB                 # resume marker: proves U continued past ecall
-    # Surface the B3 KDATA observation frame for the test to verify.
-    li   t0, KOBS_BASE
-    lw   a1, 0(t0)                # trapped user sp
-    lw   a2, 4(t0)                # ra
-    lw   a3, 8(t0)                # s0
-    lw   a4, 12(t0)               # t0
-    lw   a5, 16(t0)               # sepc
-    lw   a6, 20(t0)               # scause
-    lw   a7, 24(t0)               # sstatus
+    # ---- syscall 3: unknown number -> a0 = -ENOSYS ----
+    li   a7, 0x7F                   # not a defined syscall
+    li   a0, 0
+    ecall                          # -> a0 = -ENOSYS
+
+    # ---- surface results for the test ----
+    mv   t6, a0                     # t6 = -ENOSYS (last return)
+    li   t0, KARGS_BASE
+    lw   a1, 0(t0)                  # echoed a0 arg
+    lw   a2, 4(t0)                  # echoed a1 arg
+    lw   a3, 8(t0)                  # echoed a2 arg
+    lw   a4, 12(t0)                 # echoed a3 arg
+    lw   a5, 16(t0)                 # echoed a4 arg
+    lw   a6, 20(t0)                 # echoed a5 arg
+    li   a0, 0xBB                   # resume marker
 u_spin:
     j    u_spin
 
@@ -201,14 +204,63 @@ s_trap_entry:
     lw   t0, TF_SCAUSE(sp) ; sw t0, 20(t1)
     lw   t0, TF_SSTATUS(sp); sw t0, 24(t1)
 
-    # ---- minimal dispatcher: ECALL_U advances saved sepc by 4 ----
+    j    trap_dispatch
+
+# -----------------------------------------------------------------------------
+# trap_dispatch [S] - route by trap type. B4 scope: only ECALL_U (cause 8).
+#   Advances the frame's saved sepc by 4, then enters the syscall layer.
+# -----------------------------------------------------------------------------
+trap_dispatch:
     lw   t0, TF_SCAUSE(sp)
-    li   t1, 8
-    bne  t0, t1, s_trap_done
+    li   t1, 8                      # ECALL_U
+    bne  t0, t1, s_trap_unhandled   # other traps: out of B4 scope
     lw   t0, TF_SEPC(sp)
-    addi t0, t0, 4
+    addi t0, t0, 4                  # skip the ecall in the saved context
     sw   t0, TF_SEPC(sp)
-s_trap_done:
+    j    syscall_dispatch
+
+s_trap_unhandled:
+    j    s_trap_unhandled           # unexpected trap: surface it (spin)
+
+# -----------------------------------------------------------------------------
+# syscall_dispatch [S] - route by syscall number in TF_A7.
+#   ABI: a7=num, a0-a5=args, result written to TF_A0 (negative = -errno).
+#   All operands are read/written through the trap frame, never live GPRs.
+# -----------------------------------------------------------------------------
+syscall_dispatch:
+    lw   t0, 64(sp)                 # TF_A7 = syscall number (x17)
+    li   t1, SYS_GETABI
+    beq  t0, t1, sys_getabi
+    li   t1, SYS_DEBUG_ARGS
+    beq  t0, t1, sys_debug_args
+    li   t0, -ENOSYS                # unknown syscall -> a0 = -ENOSYS
+    j    sys_ret_a0
+
+sys_getabi:
+    li   t0, SYS_ABI_VERSION        # dependency-free version query
+    j    sys_ret_a0
+
+sys_debug_args:
+    # Echo the six argument registers (TF_A0..TF_A5) into KDATA so the
+    # supervisor-side view of the trap-frame args is externally observable.
+    li   t1, KARGS_BASE
+    lw   t0, 36(sp) ; sw t0, 0(t1)  # a0
+    lw   t0, 40(sp) ; sw t0, 4(t1)  # a1
+    lw   t0, 44(sp) ; sw t0, 8(t1)  # a2
+    lw   t0, 48(sp) ; sw t0, 12(t1) # a3
+    lw   t0, 52(sp) ; sw t0, 16(t1) # a4
+    lw   t0, 56(sp) ; sw t0, 20(t1) # a5
+    li   t0, 6                      # return: six args captured
+    j    sys_ret_a0
+
+sys_ret_a0:
+    sw   t0, 36(sp)                 # TF_A0 = return value
+    j    s_trap_exit
+
+# -----------------------------------------------------------------------------
+# s_trap_exit [S] - restore architectural context and return to U.
+# -----------------------------------------------------------------------------
+s_trap_exit:
     # restore return CSRs from the frame
     lw   t0, TF_SEPC(sp)   ; csrrw x0, sepc, t0
     lw   t0, TF_SSTATUS(sp); csrrw x0, sstatus, t0

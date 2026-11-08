@@ -40,3 +40,12 @@
 .equ KOBS_SEPC,  0x0000C010
 .equ KOBS_SCAUSE,0x0000C014
 .equ KOBS_SSTATUS,0x0000C018
+
+# ---- B4 syscall ABI ----
+# a7 = syscall number, a0-a5 = args 0..5, a0 = return (negative = -errno).
+.equ SYS_GETABI,      0     # returns ABI/kernel version constant
+.equ SYS_DEBUG_ARGS,  1     # stores a0..a5 to KARGS_BASE, returns 6
+.equ ENOSYS,          38    # unknown syscall -> a0 = -ENOSYS
+.equ SYS_ABI_VERSION, 0xB4  # B4 ABI marker returned by SYS_GETABI
+# KDATA area where SYS_DEBUG_ARGS echoes the six argument registers.
+.equ KARGS_BASE,      0x0000C040

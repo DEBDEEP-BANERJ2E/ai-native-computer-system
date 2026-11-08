@@ -86,15 +86,13 @@ class KernelStackSpec extends AnyFlatSpec with ChiselScalatestTester {
     test(new SystemCore(imemDepthWords = 256, dmemSizeBytes = 65536)) { dut =>
       loadImage(dut, words)
 
-      // Completion: U resumed past ecall (a0=0xBB), surfaced KOBS (a7 written),
-      // in U-mode on the U stack.
-      val (ok, regs, trace) = runUntil(dut, 1200) { r =>
-        r.getOrElse(10, -1L) == 0xBB &&        // a0 = post-ecall marker
-        r.getOrElse(11, -1L) == 0x0E000L &&   // a1 = KOBS trapped-sp
-        r.getOrElse(16, -1L) == 8L &&          // a6 = KOBS scause (last-but-one load)
-        r.getOrElse(17, -1L) != 0xA11A0011L && // a7 = KOBS sstatus (changed from init)
+      // Completion: U ran all three syscalls, surfaced results, marker a0=0xBB,
+      // in U-mode on the U stack. a6=0x66666666 proves the KARGS echo loaded.
+      val (ok, regs, trace) = runUntil(dut, 2000) { r =>
+        r.getOrElse(10, -1L) == 0xBB &&          // a0 = resume marker
+        r.getOrElse(16, -1L) == 0x66666666L &&   // a6 = last echoed arg
         dut.io.privLevel.peek().litValue == Privilege.U &&
-        r.getOrElse(2, -1L) == 0x0E000L        // sp = U_STACK_TOP
+        r.getOrElse(2, -1L) == 0x0E000L          // sp = U_STACK_TOP
       }
 
       if (!ok) {
@@ -126,25 +124,36 @@ class KernelStackSpec extends AnyFlatSpec with ChiselScalatestTester {
       assert(reg(regs, 10) == 0xBB, "post-ecall U marker missing")
       assert(reg(regs, 2)  == 0x0E000L, "sp not on U stack at end")
 
-      // B3: adversarial GPR preservation - every saved reg must survive U->S->U.
-      // (a0-a7 and t0/t1/t2 are legitimately clobbered post-ecall; check the rest.)
+      // B4 syscall ABI: three consecutive ecalls dispatched via the trap frame.
+      // SYS_GETABI -> s1 = ABI version (0xB4)
+      assert(reg(regs, 9) == 0xB4L, s"SYS_GETABI return wrong: ${reg(regs,9)}")
+      // SYS_DEBUG_ARGS -> a0=6 (captured), KARGS echoed the six args -> a1..a6
+      assert(reg(regs, 11) == 0x11111111L, s"echoed arg0 wrong: ${reg(regs,11)}%08x")
+      assert(reg(regs, 12) == 0x22222222L, s"echoed arg1 wrong: ${reg(regs,12)}%08x")
+      assert(reg(regs, 13) == 0x33333333L, s"echoed arg2 wrong: ${reg(regs,13)}%08x")
+      assert(reg(regs, 14) == 0x44444444L, s"echoed arg3 wrong: ${reg(regs,14)}%08x")
+      assert(reg(regs, 15) == 0x55555555L, s"echoed arg4 wrong: ${reg(regs,15)}%08x")
+      assert(reg(regs, 16) == 0x66666666L, s"echoed arg5 wrong: ${reg(regs,16)}%08x")
+      // unknown syscall -> a0 = -ENOSYS = -38 = 0xFFFFFFDA, surfaced in t6
+      assert(reg(regs, 31) == 0xFFFFFFDAL, s"-ENOSYS wrong: ${reg(regs,31)}%08x")
+
+      // Non-ABI registers preserved across all three trap round-trips.
+      // (a0-a7,t0-t2 are ABI/scratch; s1,t6 legitimately hold syscall results.)
       val preserved = Map(
         1 -> 0xA11A0001L, 3 -> 0xA11A0003L, 4 -> 0xA11A0004L,   // ra gp tp
-        8 -> 0xA11A0008L, 9 -> 0xA11A0009L,                      // s0 s1
-        18 -> 0xA11A0012L, 27 -> 0xA11A001BL,                    // s2 s11
-        28 -> 0xA11A001CL, 29 -> 0xA11A001DL, 30 -> 0xA11A001EL, 31 -> 0xA11A001FL) // t3-t6
+        8 -> 0xA11A0008L,                                      // s0
+        18 -> 0xA11A0012L, 19 -> 0xA11A0013L, 20 -> 0xA11A0014L,
+        21 -> 0xA11A0015L, 22 -> 0xA11A0016L, 23 -> 0xA11A0017L,
+        24 -> 0xA11A0018L, 25 -> 0xA11A0019L, 26 -> 0xA11A001AL,
+        27 -> 0xA11A001BL,                                     // s2..s11
+        28 -> 0xA11A001CL, 29 -> 0xA11A001DL, 30 -> 0xA11A001EL) // t3 t4 t5
       preserved.foreach { case (x, exp) =>
         assert(reg(regs, x) == exp, f"x$x not preserved: got ${reg(regs,x)}%08x want ${exp}%08x")
       }
 
-      // B3: frame contents surfaced via KOBS -> a1..a7.
-      assert(reg(regs, 11) == 0x0E000L,   s"KOBS trapped-sp wrong: ${reg(regs,11)}%08x")   // a1
-      assert(reg(regs, 12) == 0xA11A0001L, s"KOBS ra wrong: ${reg(regs,12)}%08x")          // a2
-      assert(reg(regs, 13) == 0xA11A0008L, s"KOBS s0 wrong: ${reg(regs,13)}%08x")          // a3
-      assert(reg(regs, 14) == 0x5555AAAAL, s"KOBS t0 wrong: ${reg(regs,14)}%08x")          // a4
-      assert(reg(regs, 16) == 8L,          s"KOBS scause wrong: ${reg(regs,16)}")           // a6
-      // a7 = KOBS sstatus: done-predicate already proved it was loaded ( != init );
-      // sstatus legitimately reads 0 here (SPP=U,SPIE=SIE=0 after U->S trap).
+      // Three trap events (one per ecall) must all have been ECALL_U -> S.
+      val uecalls = trace.count(r => r.trap && r.cause == 8)
+      assert(uecalls >= 3, s"expected >=3 ECALL_U traps, saw $uecalls")
     }
   }
 }
