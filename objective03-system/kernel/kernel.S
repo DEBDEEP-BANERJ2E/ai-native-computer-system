@@ -32,27 +32,91 @@ _start:
     sw   t0, -16(sp)
     lw   t1, -16(sp)              # t1 = sentinel (M stack readback)
 
-    li   t0, m_trap_entry
-    csrrw x0, mtvec, t0           # M trap vector
+    # B5: mscratch = M stack top so M traps can borrow the M stack.
+    li   t0, M_STACK_TOP
+    csrrw x0, mscratch, t0
+
+    li   t0, m_timer_entry
+    csrrw x0, mtvec, t0           # M trap vector -> timer/trap entry
 
     li   t0, 0x100                # medeleg bit 8 = ECALL-from-U delegated to S
     csrrs x0, medeleg, t0
 
+    li   t0, MIDELEG_STIP         # mideleg bit5 = STIP delegated to S
+    csrrs x0, mideleg, t0
+
+    li   t0, MIE_MTIE_STIE       # mie = MTIE|STIE
+    csrrs x0, mie, t0
+
+    # Program mtimecmp = mtime + TIMER_INTERVAL (64-bit safe write order:
+    # LO=0xFFFFFFFF, HI=new_hi, LO=new_lo) so MTIP cannot fire half-init.
+    # MMIO timer window base = MTIME_LO = 0x80003000; MTIME_HI=+4,
+    # MTIMECMP_LO=+8, MTIMECMP_HI=+12 (see memmap.inc).
+    lui  t0, 0x80003              # 0x80003000 = MTIME_LO
+    lw   t1, 0(t0)                # mtime lo
+    lw   t2, 4(t0)                # mtime hi
+    li   t3, TIMER_INTERVAL
+    add  t3, t1, t3               # new_lo = lo + interval
+    sltu t0, t3, t1               # carry
+    add  t2, t2, t0               # new_hi = hi + carry
+    li   t1, 0xFFFFFFFF
+    sw   t1, 8(t0)                # MTIMECMP_LO = 0xFFFFFFFF
+    sw   t2, 12(t0)               # MTIMECMP_HI = new_hi
+    sw   t3, 8(t0)                # MTIMECMP_LO = new_lo
+
     li   t0, s_start
     csrrw x0, mepc, t0            # return pc for mret
 
-    li   t0, 0x800                # mstatus.MPP = S (01b in bits[12:11])
+    li   t0, MSTATUS_ALL          # MIE|SIE|MPP=S
     csrrw x0, mstatus, t0
 
     mret                          # -> S-mode at s_start
 
 # -----------------------------------------------------------------------------
-# m_trap_entry  [M-mode] - safety net for non-delegated traps.
-#   Captures mcause/mepc then spins; B2 expects only delegated U->S traps.
+# m_timer_entry  [M-mode] - machine timer service (mtvec target).
+#   Only MTIP interrupts are serviced; anything else is a fatal spin.
+#   Rearm mtimecmp (deasserts level-sensitive MTIP), raise software STIP for
+#   S, restore the interrupted context, mret.
 # -----------------------------------------------------------------------------
-m_trap_entry:
+m_timer_entry:
+    csrrw sp, mscratch, sp        # sp = M stack, mscratch = interrupted sp
+    addi sp, sp, -16
+    sw   t0, 0(sp)
+    sw   t1, 4(sp)
+    sw   t2, 8(sp)
+    sw   t3, 12(sp)
+
     csrrs t0, mcause, x0
-    csrrs t1, mepc, x0
+    li   t1, 0x80000007           # MTIP interrupt cause (INT|7)
+    bne  t0, t1, m_bad_trap       # unexpected M trap -> diagnostic spin
+
+    # rearm mtimecmp = mtime + TIMER_INTERVAL
+    lui  t0, 0x80003              # 0x80003000 = MTIME_LO
+    lw   t1, 0(t0)                # mtime lo
+    lw   t2, 4(t0)                # mtime hi
+    li   t3, TIMER_INTERVAL
+    add  t3, t1, t3
+    sltu t0, t3, t1
+    add  t2, t2, t0
+    li   t1, 0xFFFFFFFF
+    sw   t1, 8(t0)                # MTIMECMP_LO = 0xFFFFFFFF
+    sw   t2, 12(t0)               # MTIMECMP_HI = new_hi
+    sw   t3, 8(t0)                # MTIMECMP_LO = new_lo
+
+    # raise supervisor timer pending: mip.STIP = 1 (delivered to S via mideleg)
+    li   t0, MIP_STIP
+    csrrs x0, sip, t0
+
+    lw   t0, 0(sp)
+    lw   t1, 4(sp)
+    lw   t2, 8(sp)
+    lw   t3, 12(sp)
+    addi sp, sp, 16
+    csrrw sp, mscratch, sp        # restore interrupted sp
+    mret                          # -> interrupted privilege
+
+m_bad_trap:
+    j    m_bad_trap               # unexpected M trap: surface it (spin)
 m_trap_spin:
     j    m_trap_spin
 
@@ -78,6 +142,9 @@ s_start:
 
     li   t0, 0x100                # sstatus.SPP bit -> clear => return to U
     csrrc x0, sstatus, t0
+
+    li   t0, MIE_STIE             # sie.STIE = supervisor timer int enable
+    csrrs x0, sie, t0
 
     li   sp, U_STACK_TOP
     sret                          # -> U-mode at u_start
@@ -110,6 +177,12 @@ u_start:
     li   t5,  0xA11A001E
     li   t6,  0xA11A001F
 
+    # B5: busy delay so real MTIP->STIP interrupts fire while U is running.
+    li   t0, 500
+u_delay:
+    addi t0, t0, -1
+    bne  t0, x0, u_delay
+
     # ---- syscall 1: SYS_GETABI -> a0 = ABI version ----
     li   a7, SYS_GETABI
     ecall
@@ -139,6 +212,8 @@ u_start:
     lw   a4, 12(t0)                 # echoed a3 arg
     lw   a5, 16(t0)                 # echoed a4 arg
     lw   a6, 20(t0)                 # echoed a5 arg
+    li   t2, KTICKS
+    lw   t2, 0(t2)                  # t2 = kernel tick count (B5 proof)
     li   a0, 0xBB                   # resume marker
 u_spin:
     j    u_spin
@@ -212,15 +287,39 @@ s_trap_entry:
 # -----------------------------------------------------------------------------
 trap_dispatch:
     lw   t0, TF_SCAUSE(sp)
-    li   t1, 8                      # ECALL_U
-    bne  t0, t1, s_trap_unhandled   # other traps: out of B4 scope
+    blt  t0, x0, td_irq           # scause[31]=1 (signed<0) -> interrupt
+    li   t1, 8                    # ECALL_U
+    beq  t0, t1, td_ecall
+    j    s_trap_unhandled         # other exceptions: out of B5 scope
+td_irq:
+    slli t0, t0, 1                # drop scause[31] -> cause_code
+    srli t0, t0, 1
+    li   t1, IRQ_STIP             # 5
+    beq  t0, t1, s_timer_irq
+    j    s_trap_unhandled         # other interrupts: out of B5 scope
+td_ecall:
     lw   t0, TF_SEPC(sp)
-    addi t0, t0, 4                  # skip the ecall in the saved context
+    addi t0, t0, 4               # skip the ecall in the saved context
     sw   t0, TF_SEPC(sp)
     j    syscall_dispatch
 
+# -----------------------------------------------------------------------------
+# s_timer_irq [S] - supervisor timer interrupt service.
+#   Runs inside the same 144-byte trap frame as exceptions. Increments the
+#   kernel tick counter and clears the STIP pending source. Does NOT advance
+#   sepc - an async interrupt resumes at the architectural next instruction.
+# -----------------------------------------------------------------------------
+s_timer_irq:
+    li   t0, KTICKS              # KDATA tick counter
+    lw   t1, 0(t0)
+    addi t1, t1, 1
+    sw   t1, 0(t0)               # KTICKS++
+    li   t0, MIP_STIP
+    csrrc x0, sip, t0            # clear mip.STIP pending
+    j    s_trap_exit             # resume U at saved sepc (no +4)
+
 s_trap_unhandled:
-    j    s_trap_unhandled           # unexpected trap: surface it (spin)
+    j    s_trap_unhandled        # unexpected trap: surface it (spin)
 
 # -----------------------------------------------------------------------------
 # syscall_dispatch [S] - route by syscall number in TF_A7.

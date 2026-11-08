@@ -86,11 +86,13 @@ class KernelStackSpec extends AnyFlatSpec with ChiselScalatestTester {
     test(new SystemCore(imemDepthWords = 256, dmemSizeBytes = 65536)) { dut =>
       loadImage(dut, words)
 
-      // Completion: U ran all three syscalls, surfaced results, marker a0=0xBB,
-      // in U-mode on the U stack. a6=0x66666666 proves the KARGS echo loaded.
-      val (ok, regs, trace) = runUntil(dut, 2000) { r =>
+      // Completion: U ran delay+3 syscalls, surfaced results, marker a0=0xBB,
+      // in U-mode on the U stack. a6=echoed arg5; t2(x7)=KTICKS>=2 proves real
+      // MTIP->STIP timer interrupts fired during U execution.
+      val (ok, regs, trace) = runUntil(dut, 4000) { r =>
         r.getOrElse(10, -1L) == 0xBB &&          // a0 = resume marker
         r.getOrElse(16, -1L) == 0x66666666L &&   // a6 = last echoed arg
+        r.getOrElse(7, -1L) >= 2L &&             // t2 = KTICKS >= 2
         dut.io.privLevel.peek().litValue == Privilege.U &&
         r.getOrElse(2, -1L) == 0x0E000L          // sp = U_STACK_TOP
       }
@@ -151,9 +153,13 @@ class KernelStackSpec extends AnyFlatSpec with ChiselScalatestTester {
         assert(reg(regs, x) == exp, f"x$x not preserved: got ${reg(regs,x)}%08x want ${exp}%08x")
       }
 
-      // Three trap events (one per ecall) must all have been ECALL_U -> S.
+      // Three ECALL_U traps (syscalls) + >=2 STIP interrupt traps (cause 0x80000005).
       val uecalls = trace.count(r => r.trap && r.cause == 8)
       assert(uecalls >= 3, s"expected >=3 ECALL_U traps, saw $uecalls")
+      val stipTicks = trace.count(r => r.trap && r.cause == 0x80000005L)
+      assert(stipTicks >= 2, s"expected >=2 STIP timer interrupts, saw $stipTicks")
+      // B5: kernel tick counter reached U (t2 = KTICKS).
+      assert(reg(regs, 7) >= 2L, s"KTICKS too low: ${reg(regs,7)}")
     }
   }
 }

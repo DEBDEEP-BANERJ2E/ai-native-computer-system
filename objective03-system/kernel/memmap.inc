@@ -49,3 +49,23 @@
 .equ SYS_ABI_VERSION, 0xB4  # B4 ABI marker returned by SYS_GETABI
 # KDATA area where SYS_DEBUG_ARGS echoes the six argument registers.
 .equ KARGS_BASE,      0x0000C040
+
+# ---- B5 timer / interrupt platform constants ----
+.equ MTIME_LO,     0x80003000
+.equ MTIME_HI,     0x80003004
+.equ MTIMECMP_LO,  0x80003008
+.equ MTIMECMP_HI,  0x8000300C
+.equ IRQ_STIP,     5            # supervisor timer interrupt code
+.equ IRQ_MTIP,     7            # machine timer interrupt code
+.equ CAUSE_INT,    0x80000000   # scause/mcause interrupt bit
+.equ CAUSE_MASK,   0x7FFFFFFF
+.equ MIP_STIP,     0x20         # mip/sip bit5 = STIP pending
+.equ MIE_MTIE,     0x80         # mie bit7 = MTIE
+.equ MIE_STIE,     0x20         # mie/sie bit5 = STIE
+.equ MIDELEG_STIP, 0x20         # mideleg bit5 -> STIP targets S
+.equ MSTATUS_MIE,  0x08         # mstatus bit3 = MIE
+.equ MSTATUS_SIE,  0x02         # mstatus bit1 = SIE (supervisor int enable)
+.equ MSTATUS_ALL,  0x80A        # MIE|SIE|MPP=S used at boot
+.equ TIMER_INTERVAL, 120        # mtime ticks between timer interrupts
+.equ KTICKS,       0x0000C080   # KDATA kernel tick counter
+.equ MIE_MTIE_STIE, 0xA0         # mie = MTIE(bit7)|STIE(bit5)
