@@ -686,7 +686,10 @@ class SystemCore(
   // (renamed: sysTrap covers exception+interrupt since both come from trapCtrl)
 
   // ---- MEM->WB register ----
-  val memEnterWbValid = memValid && !takePreciseTrap && !takeSysTrap
+  // A serializing WB retirement (older MRET/SRET/FENCE.I) must also prevent
+  // the younger MEM instruction from entering WB - otherwise it survives the
+  // return and can form a bogus post-return commit/interrupt boundary.
+  val memEnterWbValid = memValid && !takePreciseTrap && !takeSysTrap && !wbSerializingRetire
   memWbReg.io.stall := false.B
   memWbReg.io.flush := false.B
   memWbReg.io.in.valid              := memEnterWbValid
@@ -717,6 +720,9 @@ class SystemCore(
   sysMemWb.io.stall := false.B
   sysMemWb.io.flush := false.B
   sysMemWb.io.in    := sysExMem.io.out
+  // Same serializing-retire rule on the system sideband: a younger system
+  // instruction must not enter WB beside an older MRET/SRET/FENCE.I.
+  sysMemWb.io.in.valid := sysExMem.io.out.valid && !wbSerializingRetire
 
   // =========================================================================
   // 7. WB stage — CSR atomic RMW commit + writeback
