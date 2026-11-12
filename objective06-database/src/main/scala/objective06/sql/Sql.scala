@@ -84,10 +84,18 @@ class SqlParser(toks:Vector[SqlLexer.Tok]){
   private def eatOp(o:String)= if(atOp(o)){next;true}else false
   private def expectOp(o:String)={ if(!eatOp(o)) throw new Exception(s"expected '$o' got $peek"); }
   private def ident():String = peek match {case Id(s)=>{next;s};case Kw(s) if s=="COUNT"||s=="SUM"||s=="AVG"||s=="MIN"||s=="MAX"=>{next;s.toLowerCase};case _=>throw new Exception(s"expected ident got $peek")}
+  private def typeName():String = peek match {
+    case Id(s)=>{next;s.toUpperCase}
+    case Kw(s) if Set("INT","REAL","TEXT","BOOL").contains(s)=>{next;s}
+    case _=>throw new Exception(s"expected type got $peek")
+  }
 
   def parse():Sql = {
     if(eatKw("CREATE")){ if(eatKw("TABLE")) parseCreateTable() else if(eatKw("INDEX")) parseCreateIndex() else throw new Exception("expected TABLE/INDEX after CREATE") }
-    else if(eatKw("INSERT")){ eatKw("INTO"); val t=ident(); expectOp("("); /* col list optional - assume VALUES positional */ while(!eatOp(")")&&peek!=Eof) next; expectOp("VALUES"); expectOp("("); val vs=exprList(")"); expectOp(")"); Insert(t,vs) }
+    else if(eatKw("INSERT")){ eatKw("INTO"); val t=ident()
+      // optional column list ( ... ) ; VALUES may follow directly
+      if(atOp("(")){ next; var d=1; while(d>0&&peek!=Eof){ peek match{case Op("(")=>{next;d+=1};case Op(")")=>{next;d-=1};case _=>next} } }
+      eatKw("VALUES"); expectOp("("); val vs=exprList(")"); expectOp(")"); Insert(t,vs) }
     else if(eatKw("SELECT")) parseSelect()
     else if(eatKw("UPDATE")){ val t=ident(); expectOp("SET"); val sets=mutable.ArrayBuffer[(String,SqlExpr)]()
       var cont=true; while(cont){ val c=ident(); expectOp("="); sets+=((c,expr())); cont=eatOp(",") }; Update(t,sets.toVector,optWhere()) }
@@ -97,7 +105,7 @@ class SqlParser(toks:Vector[SqlLexer.Tok]){
   }
 
   private def parseCreateTable():Sql = { val n=ident(); expectOp("("); val cols=mutable.ArrayBuffer[(String,String)]()
-    var cont=true; while(cont){ val c=ident(); val ty=ident().toUpperCase; cols+=((c,ty)); cont=eatOp(",") }; expectOp(")"); CreateTable(n,cols.toVector) }
+    var cont=true; while(cont){ val c=ident(); val ty=typeName(); cols+=((c,ty)); cont=eatOp(",") }; expectOp(")"); CreateTable(n,cols.toVector) }
   private def parseCreateIndex():Sql = { val n=ident(); eatKw("ON"); val t=ident(); expectOp("("); val c=ident(); expectOp(")"); CreateIndex(n,t,c) }
 
   private def parseSelect():Sql = {
