@@ -138,6 +138,38 @@ class Database(store: PageStore, pageSize: Int = 512) {
   private def pred(row:Vector[Any],t:TableDef,w:Option[SqlExpr]):Boolean =
     w.forall(e=>toBool(evalExpr(e,row,t)))
 
+  // catalog metadata page (fixed pid 0 reserved for catalog blob)
+  private val CATALOG_PID = 0
+
+  /** Public DB API (O6 contract): execute a SQL string -> QueryResult. */
+  def query(sqlText:String):QueryResult = exec(Sql.parse(sqlText))
+
+  /** Persist catalog schema into reserved pages 0+ (length-prefixed). */
+  def saveCatalog():Unit = {
+    val bytes = catalog.serialize()
+    val needPages = math.max(1, (bytes.length + pool.pageSize - 1) / pool.pageSize)
+    var p = 0
+    while (p < needPages) {
+      val b = pool.get(CATALOG_PID + p); java.util.Arrays.fill(b, 0.toByte)
+      val off = p * pool.pageSize
+      val n = math.min(pool.pageSize, bytes.length - off)
+      if (n > 0) System.arraycopy(bytes, off, b, 0, n)
+      if (p == 0) java.nio.ByteBuffer.wrap(b, 0, 4).order(java.nio.ByteOrder.BIG_ENDIAN).putInt(bytes.length)
+      pool.setDirty(CATALOG_PID + p); p += 1
+    }
+  }
+
+  /** Load catalog from reserved pages (inverse of saveCatalog). */
+  def loadCatalog():Unit = {
+    val first=pool.get(CATALOG_PID)
+    val len=java.nio.ByteBuffer.wrap(first,0,4).order(java.nio.ByteOrder.BIG_ENDIAN).getInt
+    if(len<=0||len>pool.pageSize*1024) return
+    val needPages=(len+pool.pageSize-1)/pool.pageSize
+    val all=Array.ofDim[Byte](needPages*pool.pageSize); var o=0
+    for(p<-0 until needPages){ val b=pool.get(CATALOG_PID+p); val n=math.min(pool.pageSize,len-o); if(n>0)System.arraycopy(b,0,all,o,n); o+=pool.pageSize }
+    catalog.deserialize(all.take(len))
+  }
+
   // ---------- execution ----------
   def exec(sql:Sql):QueryResult = sql match {
     case CreateTable(n,c)=>{createTable(n,c);QueryResult.count(0)}
