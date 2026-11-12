@@ -22,5 +22,17 @@ VA != PA != file offset != storage block.
 
 ## Status
 
-- O4-A frame allocator: coded (compile-check pending)
-- O4-B..H: pending
+- O4-A frame allocator: DONE (eac557d)
+- O4-B Sv32 paging structures: DONE (ecf3549)
+- O4-C hardware page-table walker: DONE (b3f0f25) - superpage deferred
+- O4-D TLB: DONE (a3a7643)
+- O4-E satp/ASID/SFENCE.VMA: DONE (13afeda)
+- O4-F MMU fault delivery: DONE (3f8fe3e)
+- O4-G AddressSpace: DONE (4f0f368)
+- O4-H storage (blockdev+fs): DONE (cfd628f)
+
+All pieces compile. Refinements deferred to verification: PTW superpage
+encoding, TLB replacement policy (currently first-invalid), block
+allocator bitmap/free-list (currently bump), FS extent/indirect blocks.
+
+O4 complete -> next Objective 5 (CALL toolchain), then O3 integration.
