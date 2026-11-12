@@ -170,6 +170,7 @@ s_start:
 
     li   t0, CUR_PID             # B6: boot context = pid 0
     sw   x0, 0(t0)
+    jal  sched_init              # B8: scheduler mode/quantum/cursor
 
     li   sp, U_STACK_TOP
     sret                          # -> U-mode at u_start
@@ -368,7 +369,8 @@ s_timer_irq:
     sw   t1, 0(t0)               # KTICKS++
     li   t0, MIP_STIP
     csrrc x0, sip, t0            # clear mip.STIP pending
-    j    s_trap_exit             # resume U at saved sepc (no +4)
+    jal  sched_tick              # B8: quantum accounting; may context_switch
+    j    s_trap_exit             # resume at saved sepc (no +4)
 
 s_trap_unhandled:
     j    s_trap_unhandled        # unexpected trap: surface it (spin)
@@ -605,6 +607,117 @@ se_none:
 sys_ret_a0:
     sw   t0, 36(sp)                 # TF_A0 = return value
     j    s_trap_exit
+
+# -----------------------------------------------------------------------------
+# B8 scheduler. Invoked from s_timer_irq via sched_tick. Framework:
+#   sched_tick -> on quantum expiry -> sched_do_switch -> context_switch.
+# Policies: SCHED_RR (round-robin) and SCHED_EEVDF (min-vruntime pick).
+# -----------------------------------------------------------------------------
+sched_init:
+    li   t0, SCHED_MODE
+    sw   x0, 0(t0)                 # SCHED_RR
+    li   t0, QUANTUM_TICKS
+    li   t1, SCHED_QUANTUM
+    sw   t0, 0(t1)
+    li   t1, SCHED_QLEFT
+    sw   t0, 0(t1)
+    li   t1, SCHED_RR_NEXT
+    sw   x0, 0(t1)
+    ret
+
+# sched_tick: one timer tick of accounting; switch on quantum expiry.
+sched_tick:
+    li   t0, SCHED_QLEFT
+    lw   t1, 0(t0)
+    addi t1, t1, -1
+    sw   t1, 0(t0)
+    bne  t1, x0, st_done          # quantum remains
+    j    sched_do_switch
+st_done:
+    ret
+
+# sched_do_switch: mark cur READY, pick next runnable, mark RUNNING, switch.
+sched_do_switch:
+    li   t0, SCHED_QUANTUM
+    lw   t1, 0(t0)
+    li   t0, SCHED_QLEFT
+    sw   t1, 0(t0)                # reset quantum
+    # cur -> READY
+    li   t0, CUR_PID
+    lw   t0, 0(t0)                # cur pid
+    mv   t5, t0                   # save cur pid
+    li   t1, PSTATE_READY
+    jal  proc_set_state           # t0=pid(already), t1=state
+    # pick next by policy -> t0 = next pid
+    li   t0, SCHED_MODE
+    lw   t0, 0(t0)
+    li   t1, SCHED_EEVDF
+    beq  t0, t1, sched_pick_eevdf
+    j    sched_pick_rr
+sched_pick_rr:
+    # next READY pid scanning from cur+1 (wraps); t5=cur
+    addi t0, t5, 1
+    li   t1, MAX_PROC
+rr_mod:
+    bge  t0, t1, rr_wrap
+    j    rr_chk
+rr_wrap:
+    li   t0, 0
+rr_chk:
+    slli t2, t0, 5
+    li   t3, PCB_BASE
+    add  t2, t3, t2
+    lw   t3, PCB_STATE(t2)
+    li   t4, PSTATE_READY
+    beq  t3, t4, rr_found
+    addi t0, t0, 1
+    li   t1, MAX_PROC
+    # if scanned all without finding, fall back to cur
+    bne  t0, t5, rr_mod
+    mv   t0, t5                   # only cur runnable -> stay
+    j    sched_got
+rr_found:
+    # advance RR cursor
+    li   t1, SCHED_RR_NEXT
+    sw   t0, 0(t1)
+sched_got:
+    mv   t5, t0                   # t5 = next pid
+    # next -> RUNNING, NEXT_PID = next
+    li   t1, PSTATE_RUNNING
+    mv   t0, t5
+    jal  proc_set_state
+    li   t1, NEXT_PID
+    sw   t5, 0(t1)
+    j    context_switch
+
+sched_pick_eevdf:
+    # pick READY proc with minimum vruntime (EEVDF deadline proxy)
+    li   t0, -1                   # best pid
+    li   t1, 0x7FFFFFFF           # best vruntime
+    li   t2, 0                    # scan pid
+    li   t3, MAX_PROC
+ee_scan:
+    bge  t2, t3, ee_done
+    slli t4, t2, 5
+    li   t5, PCB_BASE
+    add  t4, t5, t4
+    lw   t5, PCB_STATE(t4)
+    li   t6, PSTATE_READY
+    bne  t5, t6, ee_next
+    lw   t5, PCB_VRUNTIME(t4)     # candidate vruntime
+    blt  t5, t1, ee_better
+ee_next:
+    addi t2, t2, 1
+    j    ee_scan
+ee_better:
+    mv   t1, t5                   # best vruntime
+    mv   t0, t2                   # best pid
+    j    ee_next
+ee_done:
+    # fall back to round-robin if none READY
+    blt  t0, x0, sched_pick_rr
+    mv   t5, t0
+    j    sched_got
 
 # -----------------------------------------------------------------------------
 # s_trap_exit [S] - restore architectural context and return to U.

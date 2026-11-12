@@ -112,5 +112,17 @@
 .equ PSTATE_BLOCKED, 3
 .equ PSTATE_ZOMBIE,  4
 .equ SYS_EXIT,       4             # terminate current process -> ZOMBIE
+
+# ---- B8 scheduler ----
+# Invoked from the timer path (s_timer_irq -> sched_tick). Two policies:
+#   SCHED_RR    - round-robin over runnable procs (reference baseline)
+#   SCHED_EEVDF - earliest-eligible-virtual-deadline-first on vruntime
+.equ SCHED_MODE,    0x0000C0B0    # KDATA: SCHED_RR | SCHED_EEVDF
+.equ SCHED_QUANTUM, 0x0000C0B4    # KDATA: ticks per timeslice
+.equ SCHED_QLEFT,   0x0000C0B8    # KDATA: quantum remaining for cur proc
+.equ SCHED_RR_NEXT, 0x0000C0BC    # KDATA: round-robin cursor (pid)
+.equ SCHED_RR,      0
+.equ SCHED_EEVDF,   1
+.equ QUANTUM_TICKS, 8             # default timeslice in timer ticks
 .equ SYS_SPAWN,     2             # prepare a context slot from live frame
 .equ SYS_SWITCH,    3             # context_switch to NEXT_PID
