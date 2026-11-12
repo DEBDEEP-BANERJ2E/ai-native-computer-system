@@ -76,3 +76,18 @@
 .equ KMTIME_HI,    0x0000C090    # mtime hi snapshot at rearm
 .equ KMTIMECMP_LO, 0x0000C094    # mtimecmp lo snapshot after rearm
 .equ KMTIMECMP_HI, 0x0000C098    # mtimecmp hi snapshot after rearm
+
+# ---- B6 context switching ----
+# Per-process saved TrapFrame slots (144B each) in KDATA. The kernel stack is
+# shared scratch: the trap frame is transient, so only one frame is live at a
+# time; context_switch copies it to/from these persistent slots.
+.equ CTX_BASE,      0x0000C100    # first context slot
+.equ CTX_STRIDE,    144           # == TF_SIZE
+.equ CTX0,          0x0000C100    # process 0 slot
+.equ CTX1,          0x0000C190    # process 1 slot (0xC100+0x90)
+.equ CTX2,          0x0000C220    # process 2 slot
+.equ CUR_PID,       0x0000C0F8    # KDATA: currently-running pid
+.equ NEXT_PID,      0x0000C0FC    # KDATA: pid to switch to
+.equ KB_MARKER,     0x0000C0A0    # KDATA: B6 proof - u_alt writes marker here
+.equ SYS_SPAWN,     2             # prepare a context slot from live frame
+.equ SYS_SWITCH,    3             # context_switch to NEXT_PID

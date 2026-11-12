@@ -168,6 +168,9 @@ s_start:
     li   t0, 0x100                # sstatus.SPP bit -> clear => return to U
     csrrc x0, sstatus, t0
 
+    li   t0, CUR_PID             # B6: boot context = pid 0
+    sw   x0, 0(t0)
+
     li   sp, U_STACK_TOP
     sret                          # -> U-mode at u_start
 
@@ -236,9 +239,36 @@ u_delay:
     lw   a6, 20(t0)                 # echoed a5 arg
     li   t2, KTICKS
     lw   t2, 0(t2)                  # t2 = kernel tick count (B5 proof)
+
+    # ---- B6: spawn process 1 at u_alt, then context-switch to it ----
+    li   a7, SYS_SPAWN
+    li   a0, 1                      # target pid slot = CTX1
+    li   a1, u_alt                  # entry pc for the new context
+    ecall                          # -> prepares CTX1, NEXT_PID=1
+    li   a7, SYS_SWITCH
+    li   a0, 1                      # switch to pid 1 (u_alt)
+    ecall                          # -> context_switch: save p0, run p1
+    # ---- resumed here when u_alt switches back to pid 0 ----
+    li   t0, KB_MARKER
+    lw   t2, 0(t0)                  # t2 = marker u_alt wrote (B6 proof)
     li   a0, 0xBB                   # resume marker
 u_spin:
     j    u_spin
+
+# -----------------------------------------------------------------------------
+# u_alt  [U-mode] - second process context (B6 proof target).
+#   Spawned by SYS_SPAWN with sepc=u_alt; inherits p0's regs except entry pc.
+#   Writes a marker to KDATA then switches back to pid 0.
+# -----------------------------------------------------------------------------
+u_alt:
+    li   t0, KB_MARKER
+    li   t1, 0xBEEF                 # "process 1 ran" marker
+    sw   t1, 0(t0)
+    li   a7, SYS_SWITCH
+    li   a0, 0                      # switch back to pid 0
+    ecall
+u_alt_spin:
+    j    u_alt_spin
 
 # -----------------------------------------------------------------------------
 # s_trap_entry  [S-mode] - U->S trap entry.
@@ -354,6 +384,10 @@ syscall_dispatch:
     beq  t0, t1, sys_getabi
     li   t1, SYS_DEBUG_ARGS
     beq  t0, t1, sys_debug_args
+    li   t1, SYS_SPAWN
+    beq  t0, t1, sys_spawn
+    li   t1, SYS_SWITCH
+    beq  t0, t1, sys_switch
     li   t0, -ENOSYS                # unknown syscall -> a0 = -ENOSYS
     j    sys_ret_a0
 
@@ -373,6 +407,104 @@ sys_debug_args:
     lw   t0, 56(sp) ; sw t0, 20(t1) # a5
     li   t0, 6                      # return: six args captured
     j    sys_ret_a0
+
+# -----------------------------------------------------------------------------
+# B6 context switching. The 144-byte TrapFrame at sp IS the process context.
+# context_switch saves the live frame to CTX[CUR_PID], loads CTX[NEXT_PID]
+# into the frame, points sscratch at the target's saved user sp, and exits via
+# s_trap_exit. The kernel stack is shared scratch (frame is transient).
+# -----------------------------------------------------------------------------
+context_switch:
+    # save current frame [sp,sp+TF_SIZE) -> CTX[CUR_PID]
+    li   t0, CUR_PID
+    lw   t0, 0(t0)                 # cur pid
+    li   t1, CTX_BASE
+    slli t2, t0, 7                 # pid*128
+    slli t3, t0, 4                 # pid*16
+    add  t2, t2, t3                # pid*0x90 = pid*TF_SIZE
+    add  t1, t1, t2                # dst = CTX_BASE + pid*0x90
+    add  t0, sp, x0                # src = frame base
+    li   t2, 36                    # TF_SIZE/4 words
+ctx_sv:
+    lw   t3, 0(t0)
+    sw   t3, 0(t1)
+    addi t0, t0, 4
+    addi t1, t1, 4
+    addi t2, t2, -1
+    bne  t2, x0, ctx_sv
+    # load CTX[NEXT_PID] -> frame
+    li   t0, NEXT_PID
+    lw   t0, 0(t0)                 # next pid
+    li   t1, CTX_BASE
+    slli t2, t0, 7
+    slli t3, t0, 4
+    add  t2, t2, t3
+    add  t0, t1, t2                # src = CTX[next]
+    add  t1, sp, x0                # dst = frame base
+    li   t2, 36
+ctx_ld:
+    lw   t3, 0(t0)
+    sw   t3, 0(t1)
+    addi t0, t0, 4
+    addi t1, t1, 4
+    addi t2, t2, -1
+    bne  t2, x0, ctx_ld
+    # sscratch must hold the TARGET's user sp so s_trap_exit restores it.
+    lw   t0, 4(sp)                 # next frame's TF_SP = trapped user sp
+    csrrw x0, sscratch, t0
+    # CUR_PID = NEXT_PID
+    li   t0, CUR_PID
+    li   t1, NEXT_PID
+    lw   t2, 0(t1)
+    sw   t2, 0(t0)
+    j    s_trap_exit               # restore target context + sret
+
+# sys_spawn: prepare CTX[a0] from the live frame; entry pc = a1 (TF_A1).
+# Patches the saved sepc and leaves NEXT_PID = target. Returns target pid.
+sys_spawn:
+    lw   t0, 36(sp)                # TF_A0 = target pid
+    lw   t1, 40(sp)                # TF_A1 = entry pc
+    # slot = CTX_BASE + pid*0x90
+    li   t2, CTX_BASE
+    slli t3, t0, 7
+    slli t4, t0, 4
+    add  t3, t3, t4
+    add  t2, t2, t3                # t2 = slot addr
+    # copy frame -> slot (src=sp, dst=t2); reuse t0..t4 freely (frame-safe)
+    add  t0, sp, x0
+    li   t3, 36
+sp_cp:
+    lw   t4, 0(t0)
+    sw   t4, 0(t2)
+    addi t0, t0, 4
+    addi t2, t2, 4
+    addi t3, t3, -1
+    bne  t3, x0, sp_cp
+    # patch saved sepc = entry pc (slot base was advanced; recompute)
+    lw   t0, 40(sp)                # TF_A1 = entry pc
+    li   t1, CTX_BASE
+    lw   t2, 36(sp)                # target pid again
+    slli t3, t2, 7
+    slli t4, t2, 4
+    add  t3, t3, t4
+    add  t1, t1, t3                # slot base
+    sw   t0, TF_SEPC(t1)           # saved sepc = entry pc
+    # NEXT_PID = target
+    li   t1, NEXT_PID
+    lw   t2, 36(sp)
+    sw   t2, 0(t1)
+    li   t0, 1                     # return: spawned
+    j    sys_ret_a0
+
+# sys_switch: switch to NEXT_PID (already set by spawn, or a0 override).
+sys_switch:
+    lw   t0, 36(sp)                # TF_A0 = target pid (0 = keep NEXT_PID)
+    bne  t0, x0, sw_set
+    j    context_switch            # NEXT_PID already armed
+sw_set:
+    li   t1, NEXT_PID
+    sw   t0, 0(t1)
+    j    context_switch
 
 sys_ret_a0:
     sw   t0, 36(sp)                 # TF_A0 = return value
