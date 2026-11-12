@@ -2,6 +2,7 @@
 #include "an32asm/diagnostic.hpp"
 #include "an32asm/assembler.hpp"
 #include "an32asm/flat_finalizer.hpp"
+#include "an32asm/objectfile.hpp"
 #include <iostream>
 #include <fstream>
 #include <vector>
@@ -13,6 +14,7 @@ void print_usage(const char* prog) {
               << "  -o <file>              Specify output destination (requires --emit-bin or --emit-hex)\n"
               << "  --emit-bin [file]      Emit flat binary image of resolved section (default: .text)\n"
               << "  --emit-hex [file]      Emit Verilog @00000000 hex image of resolved section (default: .text)\n"
+              << "  --emit-obj [file]      Emit AN32OBJ relocatable object file (O5-F)\n"
               << "  --section <name>       Select section to emit (default: .text)\n"
               << "  -I <dir>               Add directory to .include search paths\n"
               << "  -g                     Preserve source debug mappings\n"
@@ -34,11 +36,13 @@ int main(int argc, char** argv) {
     std::string output_file;
     std::string emit_bin_file;
     std::string emit_hex_file;
+    std::string emit_obj_file;
     std::string section_name = ".text";
     std::vector<std::string> include_paths;
 
     bool opt_emit_bin = false;
     bool opt_emit_hex = false;
+    bool opt_emit_obj = false;
     bool opt_dump_object = false;
     bool opt_dump_symbols = false;
     bool opt_dump_fixups = false;
@@ -67,6 +71,11 @@ int main(int argc, char** argv) {
             opt_emit_hex = true;
             if (i + 1 < argc && argv[i + 1][0] != '-') {
                 emit_hex_file = argv[++i];
+            }
+        } else if (arg == "--emit-obj") {
+            opt_emit_obj = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                emit_obj_file = argv[++i];
             }
         } else if (arg == "--section") {
             if (i + 1 < argc) {
@@ -114,9 +123,9 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // Explicit check for -o without flat image flags
-    if (!output_file.empty() && !opt_emit_bin && !opt_emit_hex) {
-        std::cerr << "an32-as: error: ELF relocatable object emission is introduced in Phase 3. Use --emit-hex or --emit-bin for flat bootstrap images.\n";
+    // -o requires an explicit emit mode (flat image or relocatable object)
+    if (!output_file.empty() && !opt_emit_bin && !opt_emit_hex && !opt_emit_obj) {
+        std::cerr << "an32-as: error: specify --emit-hex, --emit-bin, or --emit-obj for output.\n";
         return 1;
     }
 
@@ -125,6 +134,9 @@ int main(int argc, char** argv) {
     }
     if (opt_emit_hex && emit_hex_file.empty() && !output_file.empty()) {
         emit_hex_file = output_file;
+    }
+    if (opt_emit_obj && emit_obj_file.empty() && !output_file.empty()) {
+        emit_obj_file = output_file;
     }
 
     an32asm::SourceManager sm;
@@ -195,6 +207,18 @@ int main(int argc, char** argv) {
             } else {
                 finalizer.emit_hex(std::cout, section_name, 0);
             }
+        }
+    }
+
+    if (opt_emit_obj) {
+        if (!emit_obj_file.empty()) {
+            if (!an32asm::an32obj::write_object(*obj, emit_obj_file)) {
+                std::cerr << "an32-as: error: cannot write object file '" << emit_obj_file << "'\n";
+                return 1;
+            }
+        } else {
+            std::cerr << "an32-as: error: --emit-obj requires an output file (-o or --emit-obj <file>)\n";
+            return 1;
         }
     }
 
