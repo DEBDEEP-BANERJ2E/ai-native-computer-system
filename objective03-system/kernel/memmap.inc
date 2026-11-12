@@ -164,5 +164,26 @@
 .equ KMON_SYSCALLS, 20            # +20 TEL_SYSCALLS snapshot
 .equ KMON_TICKS,    24            # +24 KTICKS snapshot
 .equ KMON_WAKEUPS,  28            # +28 TEL_WAKEUPS snapshot
+
+# ---- Stage F: kernel I/O descriptor layer ----
+# Per-process fd table. fd -> {type, target}. Types: FD_FREE/CONSOLE/KDATA.
+# SYS_OPEN allocates, SYS_READ/SYS_WRITE service, SYS_CLOSE frees.
+.equ FD_BASE,       0x0000CA00    # fd table: MAX_PROC x MAX_FD x 8B
+.equ MAX_FD,        4
+.equ FD_TYPE,       0             # +0  FD_CONSOLE/FD_KDATA/FD_FREE
+.equ FD_TARGET,     4             # +4  target (kdata addr / device id)
+.equ FD_CONSOLE,    1
+.equ FD_KDATA,      2
+.equ FD_FREE,       0
+.equ SYS_GETPID,    17            # a0 unused -> a0=pid
+.equ SYS_OPEN,      13            # a0=type a1=target -> a0=fd or -errno
+.equ SYS_READ,      14            # a0=fd a1=buf a2=len -> a0=count
+.equ SYS_WRITE,     15            # a0=fd a1=buf a2=len -> a0=count
+.equ SYS_CLOSE,     16            # a0=fd -> a0=0/-errno
+
+# ---- Stage G: capability context (placeholder) ----
+# c0-c7 tagged-capability spill/reload is NOT yet mechanised (see B3 note);
+# PCB_FLAGS reserves the field. SYS_CAPS reports capability state only.
+.equ SYS_CAPS,      18            # a0=cap idx -> a0=cap flags (0=none yet)
 .equ SYS_SPAWN,     2             # prepare a context slot from live frame
 .equ SYS_SWITCH,    3             # context_switch to NEXT_PID

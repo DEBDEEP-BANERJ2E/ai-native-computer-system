@@ -416,6 +416,18 @@ syscall_dispatch:
     beq  t0, t1, sys_mutex_unlock
     li   t1, SYS_MONITOR
     beq  t0, t1, sys_monitor
+    li   t1, SYS_GETPID
+    beq  t0, t1, sys_getpid
+    li   t1, SYS_OPEN
+    beq  t0, t1, sys_open
+    li   t1, SYS_READ
+    beq  t0, t1, sys_read
+    li   t1, SYS_WRITE
+    beq  t0, t1, sys_write
+    li   t1, SYS_CLOSE
+    beq  t0, t1, sys_close
+    li   t1, SYS_CAPS
+    beq  t0, t1, sys_caps
     li   t0, -ENOSYS                # unknown syscall -> a0 = -ENOSYS
     j    sys_ret_a0
 
@@ -802,6 +814,101 @@ mn_tel:
     lw   t1, 0(t0)
     sw   t1, KMON_WAKEUPS(t6)
     mv   t0, t2                    # return live proc count
+    j    sys_ret_a0
+
+# ---- Stage F: fd table IO ----
+# fd_addr(pid,fd) = FD_BASE + pid*MAX_FD*8 + fd*8 = FD_BASE + pid*32 + fd*8
+sys_getpid:
+    li   t0, CUR_PID
+    lw   t0, 0(t0)
+    j    sys_ret_a0
+# sys_open: a0=type a1=target -> a0=fd or -1
+sys_open:
+    li   t0, CUR_PID
+    lw   t0, 0(t0)                 # pid
+    slli t1, t0, 5                 # pid*32 = pid*MAX_FD*8
+    li   t2, FD_BASE
+    add  t2, t2, t1                # &fdtable[pid][0]
+    li   t3, 0                     # fd index
+    li   t6, MAX_FD
+op_scan:
+    bge  t3, t6, op_full
+    slli t4, t3, 3                 # fd*8
+    add  t4, t2, t4
+    lw   t5, FD_TYPE(t4)
+    bne  t5, x0, op_next
+    # free slot: set type/target
+    lw   t5, 36(sp)                # TF_A0 = type
+    sw   t5, FD_TYPE(t4)
+    lw   t5, 40(sp)                # TF_A1 = target
+    sw   t5, FD_TARGET(t4)
+    mv   t0, t3                    # return fd
+    j    sys_ret_a0
+op_next:
+    addi t3, t3, 1
+    j    op_scan
+op_full:
+    li   t0, -1
+    j    sys_ret_a0
+# helper: resolve a0=fd -> t4=fd entry addr (uses t0=pid)
+sys_fd_addr:
+    lw   t0, 36(sp)                # fd
+    li   t1, CUR_PID
+    lw   t1, 0(t1)
+    slli t2, t1, 5
+    slli t3, t0, 3
+    add  t2, t2, t3
+    li   t3, FD_BASE
+    add  t4, t3, t2
+    ret
+sys_read:
+    jal  sys_fd_addr
+    lw   t0, FD_TYPE(t4)
+    li   t1, FD_KDATA
+    bne  t0, t1, rd_done           # only KDATA backed for now
+    # copy len bytes target->buf (a1=buf a2=len); word loop, min(len,16)
+    lw   t0, FD_TARGET(t4)         # kdata src
+    lw   t1, 40(sp)                # buf dst
+    lw   t2, 44(sp)                # len
+    li   t3, 0
+rd_cp:
+    bge  t3, t2, rd_done
+    add  t5, t0, t3
+    lw   t6, 0(t5)
+    add  t5, t1, t3
+    sw   t6, 0(t5)
+    addi t3, t3, 4
+    j    rd_cp
+rd_done:
+    lw   t0, 44(sp)                # return len
+    j    sys_ret_a0
+sys_write:
+    jal  sys_fd_addr
+    lw   t0, FD_TYPE(t4)
+    li   t1, FD_KDATA
+    bne  t0, t1, wr_done
+    lw   t0, FD_TARGET(t4)         # kdata dst
+    lw   t1, 40(sp)                # buf src
+    lw   t2, 44(sp)                # len
+    li   t3, 0
+wr_cp:
+    bge  t3, t2, wr_done
+    add  t5, t1, t3
+    lw   t6, 0(t5)
+    add  t5, t0, t3
+    sw   t6, 0(t5)
+    addi t3, t3, 4
+    j    wr_cp
+wr_done:
+    lw   t0, 44(sp)
+    j    sys_ret_a0
+sys_close:
+    jal  sys_fd_addr
+    sw   x0, FD_TYPE(t4)
+    j    sys_ret_a0
+# ---- Stage G: capability state (placeholder; real c0-c7 mechanism pending) ----
+sys_caps:
+    li   t0, 0                     # no tagged caps mechanised yet
     j    sys_ret_a0
 
 sys_ret_a0:
