@@ -96,8 +96,8 @@ bool write_object(const AssemblerObject& obj, const std::string& path) {
   const uint32_t nsym = (uint32_t)obj.symbol_table.get_symbols().size();
   const uint32_t nrel = (uint32_t)obj.fixups.size();
 
-  // header: magic8 + version + nsec + nsym + nrel + strtab_size + sec_off + sym_off + rel_off
-  const uint32_t hdrSize = 8 + 4 * 8;
+  // header: magic8 + 9 u32 fields = 44 bytes
+  const uint32_t hdrSize = 8 + 4 * 9;
   const uint32_t secTabOff = hdrSize;
   const uint32_t strOff = secTabOff + nsec * SEC_HDR_SZ;
   const uint32_t dataOff = strOff + (uint32_t)st.bytes.size();

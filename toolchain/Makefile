@@ -34,7 +34,7 @@ ASM_LIB = liban32asm.a
 CC_SRCS = compiler/src/an32cc.cpp compiler/src/lexer.cpp compiler/src/parser.cpp compiler/src/codegen.cpp
 CC_OBJS = $(CC_SRCS:.cpp=.o)
 
-TOOLS = bin/an32-encode bin/an32-decode bin/an32-disasm bin/an32-as bin/an32cc
+TOOLS = bin/an32-encode bin/an32-decode bin/an32-disasm bin/an32-as bin/an32cc bin/an32-ld
 PHASE1_TESTS = bin/test_encoder bin/test_decoder bin/test_immediates bin/test_capability_checks bin/test_disasm bin/test_serialization
 PHASE2_TESTS = bin/test_lexer bin/test_macro_include bin/test_expression bin/test_parser bin/test_symbol_table bin/test_sections bin/test_pseudo bin/test_fixups bin/test_capability_asm bin/test_diagnostics bin/test_end_to_end
 
@@ -55,6 +55,10 @@ compiler/%.o: compiler/%.cpp
 	$(CXX) $(CXXFLAGS) -Icompiler/include -c $< -o $@
 
 bin/an32-as: tools/an32-as.cpp $(ASM_LIB) $(ISA_LIB)
+	@mkdir -p bin
+	$(CXX) $(CXXFLAGS) $< -Llib -lan32asm -lan32isa -o $@
+
+bin/an32-ld: tools/an32-ld.cpp $(ASM_LIB) $(ISA_LIB)
 	@mkdir -p bin
 	$(CXX) $(CXXFLAGS) $< -Llib -lan32asm -lan32isa -o $@
 

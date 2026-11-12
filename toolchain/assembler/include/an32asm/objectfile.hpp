@@ -25,7 +25,7 @@ constexpr char     MAGIC[8]   = {'A','N','3','2','O','B','J','\0'};
 constexpr uint32_t  VERSION    = 1;
 constexpr uint32_t  SEC_HDR_SZ = 32;   // bytes per section header
 constexpr uint32_t  SYM_SZ     = 32;   // bytes per symbol record
-constexpr uint32_t  REL_SZ     = 32;   // bytes per relocation record
+constexpr uint32_t  REL_SZ     = 36;   // bytes per relocation record (9 u32)
 
 // section type / flags mirror SectionType / SectionFlags
 enum SecType : uint32_t { ST_PROGBITS = 0, ST_NOBITS = 1 };
