@@ -124,5 +124,31 @@
 .equ SCHED_RR,      0
 .equ SCHED_EEVDF,   1
 .equ QUANTUM_TICKS, 8             # default timeslice in timer ticks
+
+# ---- Stage D: process runtime / heap ----
+# Per-pid program break (brk) pointer. Heap grows up from HEAP_INIT.
+.equ HEAP_BASE,     0x0000C600    # per-pid brk pointers (4B each, MAX_PROC)
+.equ HEAP_INIT,     0x0000D000    # initial program break (above U stack)
+.equ SYS_BRK,       5             # a0=delta -> a0=old brk, sets new
+.equ SYS_SBRK,      6             # a0=increment -> a0=old brk (alloc)
+
+# ---- Stage E: IPC / synchronization primitives ----
+# sleep puts current proc BLOCKED and yields; wake(pid) makes it READY.
+# yield is a voluntary context switch. Mutex = simple test-and-set flag.
+.equ SYS_SLEEP,     7             # block current until woken
+.equ SYS_WAKE,      8             # a0=pid -> READY
+.equ SYS_YIELD,     9             # voluntary reschedule
+.equ SYS_MUTEX_LOCK,  10          # a0=mutex id -> acquire (spin)
+.equ SYS_MUTEX_UNLOCK,11         # a0=mutex id -> release
+.equ MUTEX_BASE,    0x0000C700    # per-mutex flags (4B each)
+.equ MAX_MUTEX,     8
+
+# ---- Stage H: telemetry / observability counters ----
+# Cheap KDATA counters the shell/monitor (Stage I) can read.
+.equ TEL_SWITCHES,  0x0000C800    # context switches
+.equ TEL_SYSCALLS,  0x0000C804    # syscall count
+.equ TEL_TICKS,     KTICKS        # alias: timer ticks already counted
+.equ TEL_PAGEFAULTS,0x0000C808    # reserved for Stage C
+.equ TEL_WAKEUPS,   0x0000C80C    # sleep->wake transitions
 .equ SYS_SPAWN,     2             # prepare a context slot from live frame
 .equ SYS_SWITCH,    3             # context_switch to NEXT_PID

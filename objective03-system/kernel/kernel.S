@@ -172,6 +172,14 @@ s_start:
     sw   x0, 0(t0)
     jal  sched_init              # B8: scheduler mode/quantum/cursor
 
+    # Stage D: init per-pid program break to HEAP_INIT
+    li   t0, HEAP_INIT
+    li   t1, HEAP_BASE
+    sw   t0, 0(t1)
+    sw   t0, 4(t1)
+    sw   t0, 8(t1)
+    sw   t0, 12(t1)
+
     li   sp, U_STACK_TOP
     sret                          # -> U-mode at u_start
 
@@ -392,6 +400,20 @@ syscall_dispatch:
     beq  t0, t1, sys_switch
     li   t1, SYS_EXIT
     beq  t0, t1, sys_exit
+    li   t1, SYS_BRK
+    beq  t0, t1, sys_brk
+    li   t1, SYS_SBRK
+    beq  t0, t1, sys_sbrk
+    li   t1, SYS_SLEEP
+    beq  t0, t1, sys_sleep
+    li   t1, SYS_WAKE
+    beq  t0, t1, sys_wake
+    li   t1, SYS_YIELD
+    beq  t0, t1, sys_yield
+    li   t1, SYS_MUTEX_LOCK
+    beq  t0, t1, sys_mutex_lock
+    li   t1, SYS_MUTEX_UNLOCK
+    beq  t0, t1, sys_mutex_unlock
     li   t0, -ENOSYS                # unknown syscall -> a0 = -ENOSYS
     j    sys_ret_a0
 
@@ -461,6 +483,11 @@ ctx_ld:
     li   t1, NEXT_PID
     lw   t2, 0(t1)
     sw   t2, 0(t0)
+    # telemetry: count context switches
+    li   t0, TEL_SWITCHES
+    lw   t1, 0(t0)
+    addi t1, t1, 1
+    sw   t1, 0(t0)
     j    s_trap_exit               # restore target context + sret
 
 # sys_spawn: prepare CTX[a0] from the live frame; entry pc = a1 (TF_A1).
@@ -604,7 +631,138 @@ se_found:
 se_none:
     j    se_none                   # no runnable proc: idle spin
 
+# ---- Stage D: heap (brk/sbrk) ----
+# HEAP_BASE + cur_pid*4 holds the program break. SYS_BRK: a0=delta->old brk.
+# SYS_SBRK: a0=increment->old brk (alloc).
+sys_brk:
+    li   t0, CUR_PID
+    lw   t0, 0(t0)                 # cur pid
+    slli t1, t0, 2
+    li   t2, HEAP_BASE
+    add  t2, t2, t1                # &brk[pid]
+    lw   t3, 0(t2)                 # old brk
+    lw   t4, 36(sp)                # TF_A0 = delta
+    add  t4, t3, t4
+    sw   t4, 0(t2)                 # brk = old+delta
+    mv   t0, t3                    # return old brk
+    j    sys_ret_a0
+sys_sbrk:
+    li   t0, CUR_PID
+    lw   t0, 0(t0)
+    slli t1, t0, 2
+    li   t2, HEAP_BASE
+    add  t2, t2, t1
+    lw   t3, 0(t2)                 # old brk
+    lw   t4, 36(sp)                # TF_A0 = increment
+    add  t4, t3, t4
+    sw   t4, 0(t2)
+    mv   t0, t3
+    j    sys_ret_a0
+
+# ---- Stage E: sleep/wake/yield + mutex ----
+sys_sleep:
+    # cur -> BLOCKED, then pick next READY and switch (or idle)
+    li   t0, CUR_PID
+    lw   t0, 0(t0)
+    li   t1, PSTATE_BLOCKED
+    jal  proc_set_state
+    # reuse exit-path scan for a READY proc
+    li   t0, 0
+    li   t1, MAX_PROC
+    li   t4, CUR_PID
+    lw   t4, 0(t4)
+sl_scan:
+    bge  t0, t1, sl_idle
+    bne  t0, t4, sl_chk
+    j    sl_next
+sl_chk:
+    slli t2, t0, 5
+    li   t3, PCB_BASE
+    add  t2, t3, t2
+    lw   t3, PCB_STATE(t2)
+    li   t5, PSTATE_READY
+    beq  t3, t5, sl_found
+sl_next:
+    addi t0, t0, 1
+    j    sl_scan
+sl_found:
+    li   t1, NEXT_PID
+    sw   t0, 0(t1)
+    j    context_switch
+sl_idle:
+    j    sl_idle                   # all asleep: idle
+sys_wake:
+    lw   t0, 36(sp)                # TF_A0 = pid to wake
+    li   t1, PSTATE_READY
+    jal  proc_set_state
+    li   t0, TEL_WAKEUPS
+    lw   t1, 0(t0)
+    addi t1, t1, 1
+    sw   t1, 0(t0)
+    j    sys_ret_a0
+sys_yield:
+    # voluntary reschedule: pick next READY != cur (reuse sched pick)
+    li   t0, SCHED_MODE
+    lw   t0, 0(t0)
+    li   t1, SCHED_EEVDF
+    beq  t0, t1, yd_eevdf
+    j    yd_rr
+yd_rr:
+    li   t0, CUR_PID
+    lw   t0, 0(t0)
+    addi t5, t0, 1
+    li   t1, MAX_PROC
+yr_mod:
+    bge  t5, t1, yr_wrap
+    j    yr_chk
+yr_wrap:
+    li   t5, 0
+yr_chk:
+    slli t2, t5, 5
+    li   t3, PCB_BASE
+    add  t2, t3, t2
+    lw   t3, PCB_STATE(t2)
+    li   t4, PSTATE_READY
+    beq  t3, t4, yr_found
+    addi t5, t5, 1
+    bne  t5, t0, yr_mod
+    mv   t5, t0                   # only cur: stay
+yr_found:
+    li   t1, NEXT_PID
+    sw   t5, 0(t1)
+    # reset quantum on voluntary yield too
+    li   t0, SCHED_QUANTUM
+    lw   t1, 0(t0)
+    li   t0, SCHED_QLEFT
+    sw   t1, 0(t0)
+    j    context_switch
+yd_eevdf:
+    j    yd_rr                     # EEVDF yield -> RR for now
+sys_mutex_lock:
+    lw   t0, 36(sp)                # TF_A0 = mutex id
+    slli t1, t0, 2
+    li   t2, MUTEX_BASE
+    add  t2, t2, t1                # &mutex[id]
+ml_spin:
+    lw   t3, 0(t2)
+    bne  t3, x0, ml_spin           # held -> spin
+    li   t3, 1
+    sw   t3, 0(t2)
+    j    sys_ret_a0
+sys_mutex_unlock:
+    lw   t0, 36(sp)
+    slli t1, t0, 2
+    li   t2, MUTEX_BASE
+    add  t2, t2, t1
+    sw   x0, 0(t2)
+    j    sys_ret_a0
+
 sys_ret_a0:
+    # telemetry: count every syscall (t0 = return value, preserve it)
+    li   t4, TEL_SYSCALLS
+    lw   t5, 0(t4)
+    addi t5, t5, 1
+    sw   t5, 0(t4)
     sw   t0, 36(sp)                 # TF_A0 = return value
     j    s_trap_exit
 
