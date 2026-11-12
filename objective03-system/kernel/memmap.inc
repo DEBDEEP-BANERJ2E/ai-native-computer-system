@@ -150,5 +150,19 @@
 .equ TEL_TICKS,     KTICKS        # alias: timer ticks already counted
 .equ TEL_PAGEFAULTS,0x0000C808    # reserved for Stage C
 .equ TEL_WAKEUPS,   0x0000C80C    # sleep->wake transitions
+.equ TEL_SYSCALLS_HI,0x0000C810   # high-word telemetry (reserved)
+
+# ---- Stage I: integrated kernel surface (monitor) ----
+# SYS_MONITOR dumps the process table + telemetry into KMON so the test /
+# shell can observe scheduler state without a debugger.
+.equ SYS_MONITOR,   12            # dump proc table + telemetry -> KMON
+.equ KMON_BASE,     0x0000C900    # monitor output area
+.equ KMON_NPROC,    0             # +0  proc count scanned
+.equ KMON_STATES,   4             # +4  packed per-pid states (nibble each)
+.equ KMON_PIDS,     8             # +8  packed per-pid pids
+.equ KMON_SWITCHES, 16            # +16 TEL_SWITCHES snapshot
+.equ KMON_SYSCALLS, 20            # +20 TEL_SYSCALLS snapshot
+.equ KMON_TICKS,    24            # +24 KTICKS snapshot
+.equ KMON_WAKEUPS,  28            # +28 TEL_WAKEUPS snapshot
 .equ SYS_SPAWN,     2             # prepare a context slot from live frame
 .equ SYS_SWITCH,    3             # context_switch to NEXT_PID

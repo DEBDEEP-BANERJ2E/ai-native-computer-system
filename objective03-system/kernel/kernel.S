@@ -414,6 +414,8 @@ syscall_dispatch:
     beq  t0, t1, sys_mutex_lock
     li   t1, SYS_MUTEX_UNLOCK
     beq  t0, t1, sys_mutex_unlock
+    li   t1, SYS_MONITOR
+    beq  t0, t1, sys_monitor
     li   t0, -ENOSYS                # unknown syscall -> a0 = -ENOSYS
     j    sys_ret_a0
 
@@ -755,6 +757,51 @@ sys_mutex_unlock:
     li   t2, MUTEX_BASE
     add  t2, t2, t1
     sw   x0, 0(t2)
+    j    sys_ret_a0
+
+# sys_monitor: dump proc table + telemetry into KMON; returns proc count.
+sys_monitor:
+    li   t6, KMON_BASE             # output base (t6 = scratch, frame-safe)
+    sw   x0, KMON_NPROC(t6)
+    li   t0, 0                     # scan pid
+    li   t1, MAX_PROC
+    li   t2, 0                     # live count
+mn_scan:
+    bge  t0, t1, mn_tel
+    # pcb = PCB_BASE + pid*32
+    slli t3, t0, 5
+    li   t4, PCB_BASE
+    add  t3, t4, t3
+    lw   t4, PCB_STATE(t3)
+    bne  t4, x0, mn_live           # state != UNUSED -> live
+    j    mn_next
+mn_live:
+    addi t2, t2, 1
+    # record {pid,state} at KMON_BASE+0x40+idx*8
+    slli t5, t2, 3                 # idx*8  (t2 already incremented -> use t2-1)
+    addi t5, t5, -8
+    add  t5, t6, t5
+    addi t5, t5, 0x40
+    sw   t0, 0(t5)                 # pid
+    sw   t4, 4(t5)                 # state
+mn_next:
+    addi t0, t0, 1
+    j    mn_scan
+mn_tel:
+    sw   t2, KMON_NPROC(t6)
+    li   t0, TEL_SWITCHES
+    lw   t1, 0(t0)
+    sw   t1, KMON_SWITCHES(t6)
+    li   t0, TEL_SYSCALLS
+    lw   t1, 0(t0)
+    sw   t1, KMON_SYSCALLS(t6)
+    li   t0, KTICKS
+    lw   t1, 0(t0)
+    sw   t1, KMON_TICKS(t6)
+    li   t0, TEL_WAKEUPS
+    lw   t1, 0(t0)
+    sw   t1, KMON_WAKEUPS(t6)
+    mv   t0, t2                    # return live proc count
     j    sys_ret_a0
 
 sys_ret_a0:
