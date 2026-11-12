@@ -66,6 +66,13 @@
 .equ MSTATUS_MIE,  0x08         # mstatus bit3 = MIE
 .equ MSTATUS_SIE,  0x02         # mstatus bit1 = SIE (supervisor int enable)
 .equ MSTATUS_ALL,  0x80A        # MIE|SIE|MPP=S used at boot
-.equ TIMER_INTERVAL, 120        # mtime ticks between timer interrupts
+.equ TIMER_INTERVAL, 2048        # mtime ticks between timer interrupts
 .equ KTICKS,       0x0000C080   # KDATA kernel tick counter
 .equ MIE_MTIE_STIE, 0xA0         # mie = MTIE(bit7)|STIE(bit5)
+# B5 M-handler diagnostics (temporary): prove MTIP rearm + STIP set.
+.equ KMTICKS,      0x0000C084    # M timer handler entry count
+.equ KMIP_AFTER_SET,0x0000C088   # mip snapshot after STIP write
+.equ KMTIME_LO,    0x0000C08C    # mtime lo snapshot at rearm
+.equ KMTIME_HI,    0x0000C090    # mtime hi snapshot at rearm
+.equ KMTIMECMP_LO, 0x0000C094    # mtimecmp lo snapshot after rearm
+.equ KMTIMECMP_HI, 0x0000C098    # mtimecmp hi snapshot after rearm

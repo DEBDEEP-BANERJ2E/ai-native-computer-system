@@ -67,6 +67,7 @@ class SystemCoreIO extends Bundle {
   val sysTrapVector  = Output(UInt(32.W))
   val sysTrapEpc     = Output(UInt(32.W))
   val sysTrapCause   = Output(UInt(32.W))
+  val sysTrapTargetPriv = Output(UInt(2.W))
   val timerMtip      = Output(Bool())
   val imemLoadAddr   = Input(UInt(32.W))
   val imemLoadData   = Input(UInt(32.W))
@@ -846,16 +847,17 @@ class SystemCore(
   io.currentContext := systemMMIO.io.currentContext
   io.trap.trapTaken  := takePreciseTrap || takeSysTrap
   io.trap.trapTarget := Mux(takePreciseTrap, systemMMIO.io.trapVector, trapCtrl.io.trapVector)
-  io.trap.trapEpc    := Mux(takePreciseTrap, systemMMIO.io.trapEpc, wbPcPlus4W)
-  io.trap.trapCause  := Mux(takePreciseTrap, systemMMIO.io.trapCause, sysExcCause)
-  io.trap.trapAddr   := Mux(takePreciseTrap, systemMMIO.io.trapAddr, sysExcTval)
+  io.trap.trapEpc    := Mux(takePreciseTrap, systemMMIO.io.trapEpc, trapCtrl.io.trapEntry.epc)
+  io.trap.trapCause  := Mux(takePreciseTrap, systemMMIO.io.trapCause, trapCtrl.io.trapEntry.cause)
+  io.trap.trapAddr   := Mux(takePreciseTrap, systemMMIO.io.trapAddr, trapCtrl.io.trapEntry.tval)
   io.trap.trapActive := systemMMIO.io.trapActive || sysTrapIsInterrupt || sysExcValid
 
   io.privLevel      := csrFile.io.privLevel
   io.trapTakenSys   := takeSysTrap || sysTrapIsInterrupt
   io.sysTrapVector  := trapCtrl.io.trapVector
-  io.sysTrapEpc     := Mux(sysExcValid, memPc, wbPcPlus4W)
-  io.sysTrapCause   := sysExcCause
+  io.sysTrapEpc     := trapCtrl.io.trapEntry.epc
+  io.sysTrapCause   := trapCtrl.io.trapEntry.cause
+  io.sysTrapTargetPriv := trapCtrl.io.trapEntry.targetPriv
 
   // =========================================================================
   // Forward-declared wires (must be declared before use in Chisel3 strict mode;

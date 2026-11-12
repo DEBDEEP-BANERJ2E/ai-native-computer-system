@@ -45,13 +45,11 @@ _start:
     li   t0, MIDELEG_STIP         # mideleg bit5 = STIP delegated to S
     csrrs x0, mideleg, t0
 
-    li   t0, MIE_MTIE_STIE       # mie = MTIE|STIE
-    csrrs x0, mie, t0
-
-    # Program mtimecmp = mtime + TIMER_INTERVAL (64-bit safe write order:
-    # LO=0xFFFFFFFF, HI=new_hi, LO=new_lo) so MTIP cannot fire half-init.
-    # MMIO timer window base = MTIME_LO = 0x80003000; MTIME_HI=+4,
-    # MTIMECMP_LO=+8, MTIMECMP_HI=+12 (see memmap.inc).
+    # Program mtimecmp = mtime + TIMER_INTERVAL BEFORE enabling any
+    # interrupt: mtimecmp resets to 0 so MTIP is pending from reset; the
+    # deadline must be armed while MTIE/MIE are still disabled.
+    # (64-bit safe order: LO=0xFFFFFFFF, HI=new_hi, LO=new_lo.)
+    # MMIO base = MTIME_LO = 0x80003000; MTIME_HI=+4, MTIMECMP_LO=+8, +12.
     lui  t0, 0x80003              # 0x80003000 = MTIME_LO
     lw   t1, 0(t0)                # mtime lo
     lw   t2, 4(t0)                # mtime hi
@@ -64,10 +62,14 @@ _start:
     sw   t2, 12(t0)               # MTIMECMP_HI = new_hi
     sw   t3, 8(t0)                # MTIMECMP_LO = new_lo
 
+    # Only now enable machine+supervisor timer interrupts.
+    li   t0, MIE_MTIE_STIE       # mie = MTIE|STIE
+    csrrs x0, mie, t0
+
     li   t0, s_start
     csrrw x0, mepc, t0            # return pc for mret
 
-    li   t0, MSTATUS_ALL          # MIE|SIE|MPP=S
+    li   t0, 0x800                # BISECT: MPP=S only (B4 value)
     csrrw x0, mstatus, t0
 
     mret                          # -> S-mode at s_start
@@ -90,6 +92,11 @@ m_timer_entry:
     li   t1, 0x80000007           # MTIP interrupt cause (INT|7)
     bne  t0, t1, m_bad_trap       # unexpected M trap -> diagnostic spin
 
+    li   t0, KMTICKS              # B5 diag: count M timer entries
+    lw   t1, 0(t0)
+    addi t1, t1, 1
+    sw   t1, 0(t0)
+
     # rearm mtimecmp = mtime + TIMER_INTERVAL
     lui  t0, 0x80003              # 0x80003000 = MTIME_LO
     lw   t1, 0(t0)                # mtime lo
@@ -103,9 +110,27 @@ m_timer_entry:
     sw   t2, 12(t0)               # MTIMECMP_HI = new_hi
     sw   t3, 8(t0)                # MTIMECMP_LO = new_lo
 
-    # raise supervisor timer pending: mip.STIP = 1 (delivered to S via mideleg)
+    # B5 diag: snapshot mtime/mtimecmp after rearm to prove MTIP deasserts
+    lui  t0, 0x80003
+    lw   t1, 0(t0)
+    li   t2, KMTIME_LO
+    sw   t1, 0(t2)
+    lw   t1, 4(t0)
+    li   t2, KMTIME_HI
+    sw   t1, 0(t2)
+    lw   t1, 8(t0)
+    li   t2, KMTIMECMP_LO
+    sw   t1, 0(t2)
+    lw   t1, 12(t0)
+    li   t2, KMTIMECMP_HI
+    sw   t1, 0(t2)
+
+    # raise supervisor timer pending via mip.STIP (M-mode direct write)
     li   t0, MIP_STIP
-    csrrs x0, sip, t0
+    csrrs x0, mip, t0
+    csrrs t1, mip, x0             # B5 diag: verify STIP actually set
+    li   t2, KMIP_AFTER_SET
+    sw   t1, 0(t2)
 
     lw   t0, 0(sp)
     lw   t1, 4(sp)
@@ -142,9 +167,6 @@ s_start:
 
     li   t0, 0x100                # sstatus.SPP bit -> clear => return to U
     csrrc x0, sstatus, t0
-
-    li   t0, MIE_STIE             # sie.STIE = supervisor timer int enable
-    csrrs x0, sie, t0
 
     li   sp, U_STACK_TOP
     sret                          # -> U-mode at u_start
