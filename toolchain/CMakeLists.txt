@@ -44,6 +44,7 @@ add_library(an32asm STATIC
     assembler/src/object.cpp
     assembler/src/objectfile.cpp
     assembler/src/exeformat.cpp
+    assembler/src/linker.cpp
     assembler/src/flat_finalizer.cpp
     assembler/src/assembler.cpp
 )

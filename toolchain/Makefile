@@ -24,6 +24,7 @@ ASM_SRCS = assembler/src/source_manager.cpp \
            assembler/src/object.cpp \
            assembler/src/objectfile.cpp \
            assembler/src/exeformat.cpp \
+           assembler/src/linker.cpp \
            assembler/src/flat_finalizer.cpp \
            assembler/src/assembler.cpp
 
