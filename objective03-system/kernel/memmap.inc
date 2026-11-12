@@ -89,5 +89,28 @@
 .equ CUR_PID,       0x0000C0F8    # KDATA: currently-running pid
 .equ NEXT_PID,      0x0000C0FC    # KDATA: pid to switch to
 .equ KB_MARKER,     0x0000C0A0    # KDATA: B6 proof - u_alt writes marker here
+
+# ---- B7 process table (PCB) ----
+# One PCB per pid; the saved TrapFrame lives in the CTX slot at
+# CTX_BASE + pid*CTX_STRIDE. pid indexes both tables (MAX_PROC bounded by
+# available CTX slots in KDATA).
+.equ MAX_PROC,      4
+.equ PCB_BASE,      0x0000C400    # after CTX slots (0xC100..0xC33F)
+.equ PCB_STRIDE,    32
+.equ PCB_STATE,     0               # +0  PSTATE_*
+.equ PCB_PID,       4               # +4  pid (== index)
+.equ PCB_ENTRY,     8               # +8  entry pc
+.equ PCB_USP,       12              # +12 user stack top
+.equ PCB_KSP,       16              # +16 kernel stack top (reserved; shared now)
+.equ PCB_EXIT,      20              # +20 exit status
+.equ PCB_VRUNTIME,  24              # +24 scheduling metadata (B8)
+.equ PCB_FLAGS,     28              # +28 addr-space/capability placeholders
+# process states
+.equ PSTATE_UNUSED,  0
+.equ PSTATE_READY,   1
+.equ PSTATE_RUNNING, 2
+.equ PSTATE_BLOCKED, 3
+.equ PSTATE_ZOMBIE,  4
+.equ SYS_EXIT,       4             # terminate current process -> ZOMBIE
 .equ SYS_SPAWN,     2             # prepare a context slot from live frame
 .equ SYS_SWITCH,    3             # context_switch to NEXT_PID

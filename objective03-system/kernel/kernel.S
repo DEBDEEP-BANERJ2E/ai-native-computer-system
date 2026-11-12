@@ -388,6 +388,8 @@ syscall_dispatch:
     beq  t0, t1, sys_spawn
     li   t1, SYS_SWITCH
     beq  t0, t1, sys_switch
+    li   t1, SYS_EXIT
+    beq  t0, t1, sys_exit
     li   t0, -ENOSYS                # unknown syscall -> a0 = -ENOSYS
     j    sys_ret_a0
 
@@ -505,6 +507,100 @@ sw_set:
     li   t1, NEXT_PID
     sw   t0, 0(t1)
     j    context_switch
+
+# -----------------------------------------------------------------------------
+# B7 process table. PCB = PCB_BASE + pid*PCB_STRIDE (stride 32). The saved
+# TrapFrame lives in the CTX slot at CTX_BASE + pid*CTX_STRIDE. pid indexes
+# both tables. Lifecycle: UNUSED -> READY -> RUNNING -> (BLOCKED) -> ZOMBIE.
+# -----------------------------------------------------------------------------
+# proc_state(pid) -> t0 : read PCB.state
+proc_state:
+    slli t1, t0, 5
+    li   t2, PCB_BASE
+    add  t1, t2, t1
+    lw   t0, PCB_STATE(t1)
+    ret
+
+# proc_set_state(pid, state) : t0=pid, t1=state
+proc_set_state:
+    slli t2, t0, 5
+    li   t3, PCB_BASE
+    add  t2, t3, t2
+    sw   t1, PCB_STATE(t2)
+    ret
+
+# proc_alloc -> t0 = free pid or -1. Marks slot READY. (leaf; jal/ret safe)
+proc_alloc:
+    li   t0, 0                     # candidate pid
+    li   t1, MAX_PROC
+pa_scan:
+    bge  t0, t1, pa_none
+    slli t2, t0, 5
+    li   t3, PCB_BASE
+    add  t2, t3, t2               # pcb addr
+    lw   t3, PCB_STATE(t2)
+    bne  t3, x0, pa_next          # state != UNUSED(0) -> skip
+    li   t3, PSTATE_READY
+    sw   t3, PCB_STATE(t2)
+    sw   t0, PCB_PID(t2)
+    ret
+pa_next:
+    addi t0, t0, 1
+    j    pa_scan
+pa_none:
+    li   t0, -1
+    ret
+
+# proc_init(pid, entry, usp): t0=pid t1=entry t2=usp -> READY pcb
+proc_init:
+    slli t3, t0, 5
+    li   t4, PCB_BASE
+    add  t3, t4, t3
+    li   t4, PSTATE_READY
+    sw   t4, PCB_STATE(t3)
+    sw   t0, PCB_PID(t3)
+    sw   t1, PCB_ENTRY(t3)
+    sw   t2, PCB_USP(t3)
+    li   t4, S_STACK_TOP          # shared kernel stack for now
+    sw   t4, PCB_KSP(t3)
+    ret
+
+# sys_exit: mark current ZOMBIE, switch to next READY proc (or spin).
+sys_exit:
+    lw   t0, 36(sp)                # TF_A0 = exit status
+    li   t1, CUR_PID
+    lw   t1, 0(t1)                 # t1 = cur pid
+    slli t2, t1, 5
+    li   t3, PCB_BASE
+    add  t2, t3, t2               # cur pcb
+    li   t3, PSTATE_ZOMBIE
+    sw   t3, PCB_STATE(t2)
+    sw   t0, PCB_EXIT(t2)
+    # scan for a READY proc != cur
+    li   t0, 0
+    li   t1, MAX_PROC
+    li   t4, CUR_PID
+    lw   t4, 0(t4)                 # t4 = cur pid (skip)
+se_scan:
+    bge  t0, t1, se_none
+    bne  t0, t4, se_chk
+    j    se_next
+se_chk:
+    slli t2, t0, 5
+    li   t3, PCB_BASE
+    add  t2, t3, t2
+    lw   t3, PCB_STATE(t2)
+    li   t5, PSTATE_READY
+    beq  t3, t5, se_found
+se_next:
+    addi t0, t0, 1
+    j    se_scan
+se_found:
+    li   t1, NEXT_PID
+    sw   t0, 0(t1)                 # NEXT_PID = found
+    j    context_switch
+se_none:
+    j    se_none                   # no runnable proc: idle spin
 
 sys_ret_a0:
     sw   t0, 36(sp)                 # TF_A0 = return value
