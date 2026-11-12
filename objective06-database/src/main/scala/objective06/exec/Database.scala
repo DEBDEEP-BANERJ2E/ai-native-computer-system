@@ -104,7 +104,7 @@ class Database(store: PageStore, pageSize: Int = 512) {
   // ---------- expression eval ----------
   private def evalExpr(e:SqlExpr,row:Vector[Any],t:TableDef):Any = e match {
     case Lit(v)=>v
-    case Col(n)=>{ val i=t.columns.indexWhere(_.name==n); if(i<0)0 else row(i) }
+    case Col(n)=>{ val i=colIndexOf(t.columns,n); if(i<0||i>=row.length)0 else row(i) }
     case Bin(op,l,r)=>{ val a=evalExpr(l,row,t); val b=evalExpr(r,row,t); applyOp(op,a,b) }
     case Un("NOT",x)=> !(evalExpr(x,row,t) match {case b:Boolean=>b;case i:Int=>i!=0;case _=>false})
     case Un("-",x)=> -(evalExpr(x,row,t) match {case i:Int=>i;case d:Double=>d.toInt;case _=>0})
@@ -176,50 +176,82 @@ class Database(store: PageStore, pageSize: Int = 512) {
       }
       QueryResult.count(n)
     }
-    case Select(cols,table,w,gb,having,distinct)=> select(cols,table,w,gb,having,distinct)
+    case Select(cols,fromTables,w,gb,having,distinct)=> select(cols,fromTables,w,gb,having,distinct)
   }
 
-  private def select(cols:Vector[SqlExpr],table:String,w:Option[SqlExpr],gb:Vector[String],having:Option[SqlExpr],distinct:Boolean):QueryResult = {
-    val td=catalog.table(table).getOrElse(throw new Exception(s"no table $table"))
-    val hf=heaps(table)
-    // gather matching rows
-    val rows=hf.scan().map{case(_,b)=>decodeRecord(td,b)}.filter(r=>pred(r,td,w))
-    // projection / aggregation
+  /** Resolve a column reference against a schema. Joined schemas store
+    * columns qualified as "table.col"; unqualified queries match the column
+    * part after the last dot. Returns index or -1. */
+  private def colIndexOf(cols:Vector[Column], name:String):Int = {
+    val exact = cols.indexWhere(_.name==name)
+    if (exact>=0) return exact
+    if (name.indexOf('.')<0) cols.indexWhere(c=>c.name.endsWith("."+name))
+    else -1
+  }
+
+  /** Resolve a column name against a (possibly joined) schema: exact match,
+    * else "table.col" qualified suffix match. Returns column index or -1. */
+  private def colIdx(cols:Vector[Column], name:String):Int = colIndexOf(cols,name)
+
+  private def select(cols:Vector[SqlExpr],fromTables:Vector[(String,Option[SqlExpr])],w:Option[SqlExpr],gb:Vector[String],having:Option[SqlExpr],distinct:Boolean):QueryResult = {
+    // resolve tables + their rows
+    val tds=fromTables.map{case(t,_)=>catalog.table(t).getOrElse(throw new Exception(s"no table $t"))}
+    val hfs=fromTables.map{case(t,_)=>heaps(t)}
+    val tableRows=tds.zip(hfs).map{case(td,hf)=>hf.scan().map{case(_,b)=>decodeRecord(td,b)}}
+    // per-table qualified columns "table.col"; prefix schemas for join-ON eval
+    val qcols = fromTables.zip(tds).map{case((tn,_),td)=> td.columns.map(c=>c.copy(name=s"$tn.${c.name}"))}
+    val schemas = qcols.scanLeft(Vector.empty[Column])(_++_).tail // schemas(i)=cols of tables 0..i
+    // nested-loop join
+    var joined=tableRows.head
+    var ti=1
+    while(ti<fromTables.size){
+      val on=fromTables(ti)._2
+      val nextRows=tableRows(ti)
+      val schS=schemas(ti) // qualified cols of tables 0..ti
+      joined=for{ l<-joined; r<-nextRows; if on.forall(o=>toBool(evalExprOn(o,l++r,TableDef("j",schS)))) } yield l++r
+      ti+=1
+    }
+    val combCols=schemas.last
+    val combTd=TableDef("joined",combCols)
+    val rows=joined.filter(r=>pred(r,combTd,w))
+    // projection / aggregation (reuse single-table logic on combined schema)
     val isAgg=cols.exists{case Agg(_,_)=>true;case _=>false}||gb.nonEmpty
     if(isAgg){
-      // group rows by gb keys (or single group)
-      val groups=if(gb.isEmpty) Map(0->rows) else rows.groupBy(r=>gb.map(c=>r(td.columns.indexWhere(_.name==c))).toList)
+      val groups=if(gb.isEmpty) Map(0->rows) else rows.groupBy(r=>gb.map(c=>{val i=colIdx(combCols,c);if(i<0)0 else r(i)}).toList)
       val out=mutable.ArrayBuffer[Vector[Any]]()
       groups.foreach{case(_,rs)=>
         val aggs=cols.map{
           case Star()=>rs.size
-          case Col(n)=> if(gb.contains(n)){ val i=td.columns.indexWhere(_.name==n); rs.head(i) } else 0
-          case Agg(fn,a)=> aggregate(fn,a,rs,td)
+          case Col(n)=>{val i=colIdx(combCols,n);if(gb.contains(n)&&i>=0) rs.head(i) else 0}
+          case Agg(fn,a)=> aggregate(fn,a,rs,combTd)
           case Lit(v)=>v
-          case e=>evalExpr(e,rs.headOption.getOrElse(Vector.fill(td.columns.size)(0)),td)
+          case e=>evalExpr(e,rs.headOption.getOrElse(Vector.fill(combCols.size)(0)),combTd)
         }
         val row=Vector(aggs:_*)
-        if(having.forall(h=>toBool(evalAggExpr(h,row,td,rs)))) out+=row
+        if(having.forall(h=>toBool(evalAggExpr(h,row,combTd,rs)))) out+=row
       }
       QueryResult(out.toVector.distinct,0,cols.map{case Col(n)=>n;case Agg(f,a)=>f+"("+a+")";case _=>"expr"})
     } else {
-      // expand Star to all columns, then project each expr to a single value
-      val pcols = if (cols.exists(_ == Star())) td.columns.map(c => Col(c.name)) else cols
-      val flat = rows.map { r =>
-        pcols.map {
-          case Col(n) => { val i = td.columns.indexWhere(_.name == n); if (i < 0) 0 else r(i) }
-          case e      => evalExpr(e, r, td)
-        }.toVector
-      }
-      QueryResult((if (distinct) flat.distinct else flat).toVector, 0,
-        pcols.map { case Col(n) => n; case _ => "expr" })
+      val pcols=if(cols.exists(_==Star())) combCols.map(c=>Col(c.name)) else cols
+      val flat=rows.map{r=>pcols.map{
+        case Col(n)=>{val i=colIdx(combCols,n);if(i<0)0 else r(i)}
+        case e=>evalExpr(e,r,combTd)}.toVector}
+      QueryResult((if(distinct)flat.distinct else flat).toVector,0,pcols.map{case Col(n)=>n;case _=>"expr"})
     }
+  }
+
+  // eval an expression over a (possibly joined) row; Col resolves via colIndexOf
+  private def evalExprOn(e:SqlExpr,row:Vector[Any],t:TableDef):Any = e match {
+    case Col(n)=>{val i=colIndexOf(t.columns,n);if(i<0||i>=row.length)0 else row(i)}
+    case Bin(op,l,r)=>applyOp(op,evalExprOn(l,row,t),evalExprOn(r,row,t))
+    case Lit(v)=>v
+    case _=>evalExpr(e,row,t)
   }
 
   private def evalAggExpr(e:SqlExpr,row:Vector[Any],t:TableDef,rs:Seq[Vector[Any]]):Any = e match {
     case Agg(fn,a)=>aggregate(fn,a,rs,t)
     case Bin(op,l,r)=>applyOp(op,evalAggExpr(l,row,t,rs),evalAggExpr(r,row,t,rs))
-    case Col(n)=>{val i=t.columns.indexWhere(_.name==n);if(i<row.length)i else 0; val ix=math.min(i,row.length-1); row(ix)}
+    case Col(n)=>{val i=colIndexOf(t.columns,n);if(i<0||i>=row.length)0 else row(i)}
     case Lit(v)=>v
     case _=>0
   }

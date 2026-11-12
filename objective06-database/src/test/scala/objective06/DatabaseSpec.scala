@@ -40,4 +40,28 @@ class DatabaseSpec extends AnyFlatSpec with Matchers {
     r.rows should have size 1
     r.rows(0).toSeq should contain theSameElementsAs Seq(7, "hi")
   }
+
+  it should "join two tables" in {
+    val db = new Database(new MemoryPageStore(512))
+    db.exec(Sql.parse("CREATE TABLE a (id INT, x INT)"))
+    db.exec(Sql.parse("CREATE TABLE b (id INT, y INT)"))
+    db.exec(Sql.parse("INSERT INTO a VALUES (1, 10)"))
+    db.exec(Sql.parse("INSERT INTO a VALUES (2, 20)"))
+    db.exec(Sql.parse("INSERT INTO b VALUES (1, 100)"))
+    db.exec(Sql.parse("INSERT INTO b VALUES (2, 200)"))
+    val r = db.exec(Sql.parse("SELECT a.id, x, y FROM a JOIN b ON a.id = b.id"))
+    r.rows should have size 2
+    r.rows.map(_(0)).toSet shouldBe Set(1, 2)
+  }
+
+  it should "cross join via comma" in {
+    val db = new Database(new MemoryPageStore(512))
+    db.exec(Sql.parse("CREATE TABLE a (v INT)"))
+    db.exec(Sql.parse("CREATE TABLE b (w INT)"))
+    db.exec(Sql.parse("INSERT INTO a VALUES (1)"))
+    db.exec(Sql.parse("INSERT INTO a VALUES (2)"))
+    db.exec(Sql.parse("INSERT INTO b VALUES (9)"))
+    val r = db.exec(Sql.parse("SELECT v, w FROM a, b"))
+    r.rows should have size 2
+  }
 }

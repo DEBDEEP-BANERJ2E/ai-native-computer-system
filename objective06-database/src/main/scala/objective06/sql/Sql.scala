@@ -19,7 +19,8 @@ sealed trait Sql
 case class CreateTable(name:String, cols:Vector[(String,String)]) extends Sql
 case class CreateIndex(name:String, table:String, col:String) extends Sql
 case class Insert(table:String, values:Vector[SqlExpr]) extends Sql
-case class Select(cols:Vector[SqlExpr], table:String, where:Option[SqlExpr],
+// fromTables: (tableName, joinCondition-or-None). Single table = one entry, None.
+case class Select(cols:Vector[SqlExpr], fromTables:Vector[(String,Option[SqlExpr])], where:Option[SqlExpr],
                   groupBy:Vector[String], having:Option[SqlExpr], distinct:Boolean) extends Sql
 case class Update(table:String, sets:Vector[(String,SqlExpr)], where:Option[SqlExpr]) extends Sql
 case class Delete(table:String, where:Option[SqlExpr]) extends Sql
@@ -48,7 +49,8 @@ object SqlLexer {
 
   private val KW = Set("SELECT","FROM","WHERE","INSERT","INTO","VALUES","UPDATE","SET",
     "DELETE","CREATE","TABLE","INDEX","ON","DROP","AND","OR","NOT","NULL","AS",
-    "INT","REAL","TEXT","BOOL","COUNT","SUM","AVG","MIN","MAX","DISTINCT","BY","HAVING","IN","BETWEEN","IS")
+    "INT","REAL","TEXT","BOOL","COUNT","SUM","AVG","MIN","MAX","DISTINCT","BY","HAVING","IN","BETWEEN","IS",
+    "JOIN","INNER","LEFT","RIGHT","FULL","CROSS","OUTER","NATURAL","UNION","ORDER","GROUP")
 
   def tokenize(s:String):Vector[Tok] = {
     val out=mutable.ArrayBuffer[Tok](); var i=0; val n=s.length
@@ -65,7 +67,7 @@ object SqlLexer {
         val w=sb.toString; val up=w.toUpperCase
         if(KW.contains(up)) out+=Kw(up) else out+=Id(w); i=j }
       else if(i+1<n && Set("<=",">=","!=","<>","==").contains(s.substring(i,i+2))){out+=Op(s.substring(i,i+2));i+=2}
-      else if("(),;*+-/%=<>".contains(c)){out+=Op(c.toString);i+=1}
+      else if("(),;*+-/%=<>.!".contains(c)){out+=Op(c.toString);i+=1}
       else i+=1 // skip unknown
     }
     out+=Eof; out.toVector
@@ -112,12 +114,26 @@ class SqlParser(toks:Vector[SqlLexer.Tok]){
     val distinct = eatKw("DISTINCT")
     val cols=mutable.ArrayBuffer[SqlExpr]()
     if(eatOp("*")) cols+=Star() else { cols+=expr(); while(eatOp(",")) cols+=expr() }
-    eatKw("FROM"); val table=ident()
+    eatKw("FROM")
+    val fromT=mutable.ArrayBuffer[(String,Option[SqlExpr])]()
+    fromT+=((ident(),None))
+    // comma joins (cross) and JOIN ... ON
+    var cont=true
+    while(cont){
+      if(eatOp(",")){ fromT+=((ident(),None)) }
+      else if(atKw("JOIN")||atKw("INNER")||atKw("LEFT")){ 
+        if(atKw("INNER")||atKw("LEFT")) next
+        eatKw("JOIN"); val t2=ident()
+        var on:Option[SqlExpr]=None
+        if(eatKw("ON")) on=Some(expr())
+        fromT+=((t2,on))
+      } else cont=false
+    }
     val where=optWhere()
     var groupBy=Vector.empty[String]; var having:Option[SqlExpr]=None
     if(eatKw("GROUP")){ eatKw("BY"); val g=mutable.ArrayBuffer[String](); g+=ident(); while(eatOp(","))g+=ident(); groupBy=g.toVector }
     if(eatKw("HAVING")) having=Some(expr())
-    Select(cols.toVector,table,where,groupBy,having,distinct)
+    Select(cols.toVector,fromT.toVector,where,groupBy,having,distinct)
   }
   private def optWhere():Option[SqlExpr]= if(eatKw("WHERE")) Some(expr()) else None
 
@@ -146,7 +162,7 @@ class SqlParser(toks:Vector[SqlLexer.Tok]){
     case Kw("TRUE")=>{next;Lit(true)}
     case Kw("FALSE")=>{next;Lit(false)}
     case Kw(k) if Set("COUNT","SUM","AVG","MIN","MAX").contains(k)=>{next;expectOp("(");val a=expr();expectOp(")");Agg(k,a)}
-    case Id(s)=>{next;Col(s)}
+    case Id(s)=>{next; var nm=s; while(eatOp(".")&&peek.isInstanceOf[Id]){nm+="."+next.asInstanceOf[Id].s}; Col(nm)}
     case Op("(")=>{next;val e=expr();expectOp(")");e}
     case Op("*")=>{next;Star()}
     case _=>{next;Lit(0)}
