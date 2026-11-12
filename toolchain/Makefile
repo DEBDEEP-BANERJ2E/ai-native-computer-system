@@ -1,5 +1,5 @@
 CXX ?= clang++
-CXXFLAGS ?= -std=c++20 -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -O2 -Iinclude -Iassembler/include
+CXXFLAGS ?= -std=c++20 -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -O2 -Iinclude -Iassembler/include -Icompiler/include
 PYTHON ?= python3
 
 # ISA Library
@@ -31,7 +31,10 @@ ASM_SRCS = assembler/src/source_manager.cpp \
 ASM_OBJS = $(ASM_SRCS:.cpp=.o)
 ASM_LIB = liban32asm.a
 
-TOOLS = bin/an32-encode bin/an32-decode bin/an32-disasm bin/an32-as
+CC_SRCS = compiler/src/an32cc.cpp compiler/src/lexer.cpp compiler/src/parser.cpp compiler/src/codegen.cpp
+CC_OBJS = $(CC_SRCS:.cpp=.o)
+
+TOOLS = bin/an32-encode bin/an32-decode bin/an32-disasm bin/an32-as bin/an32cc
 PHASE1_TESTS = bin/test_encoder bin/test_decoder bin/test_immediates bin/test_capability_checks bin/test_disasm bin/test_serialization
 PHASE2_TESTS = bin/test_lexer bin/test_macro_include bin/test_expression bin/test_parser bin/test_symbol_table bin/test_sections bin/test_pseudo bin/test_fixups bin/test_capability_asm bin/test_diagnostics bin/test_end_to_end
 
@@ -48,9 +51,16 @@ $(ASM_LIB): $(ASM_OBJS) $(ISA_LIB)
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
+compiler/%.o: compiler/%.cpp
+	$(CXX) $(CXXFLAGS) -Icompiler/include -c $< -o $@
+
 bin/an32-as: tools/an32-as.cpp $(ASM_LIB) $(ISA_LIB)
 	@mkdir -p bin
 	$(CXX) $(CXXFLAGS) $< -Llib -lan32asm -lan32isa -o $@
+
+bin/an32cc: $(CC_OBJS)
+	@mkdir -p bin
+	$(CXX) $(CXXFLAGS) $(CC_OBJS) -o $@
 
 bin/%: tools/%.cpp $(ISA_LIB)
 	@mkdir -p bin

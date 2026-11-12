@@ -69,6 +69,15 @@ target_link_libraries(an32-disasm PRIVATE an32isa)
 add_executable(an32-as tools/an32-as.cpp)
 target_link_libraries(an32-as PRIVATE an32asm an32isa)
 
+# AN32 C-subset compiler (O5-A frontend + O5-D v1 backend)
+add_executable(an32cc
+    compiler/src/an32cc.cpp
+    compiler/src/lexer.cpp
+    compiler/src/parser.cpp
+    compiler/src/codegen.cpp
+)
+target_include_directories(an32cc PRIVATE compiler/include)
+
 # Tests
 enable_testing()
 
