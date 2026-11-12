@@ -76,6 +76,12 @@ static constexpr std::array<InstructionDescriptor, TOTAL_INSTRUCTION_COUNT> INST
     { Mnemonic::MRET, "mret", InstructionFormat::SYSTEM_FIXED, 0x73, 0x0, 0x00, 0x302, 0x30200073, 0xFFFFFFFF, false, true, false, true, 0, 0, 0, false, false, false },
     { Mnemonic::SFENCE_VMA, "sfence.vma", InstructionFormat::SYSTEM_R, 0x73, 0x0, 0x09, 0x000, 0x12000073, 0xFE007FFF, false, true, true, false, 0, 31, 31, false, false, false },
     { Mnemonic::FENCE_I, "fence.i", InstructionFormat::SYSTEM_FIXED, 0x0F, 0x1, 0x00, 0x000, 0x0000100F, 0xFFFFFFFF, false, true, false, false, 0, 0, 0, false, false, false },
+    { Mnemonic::CSRRW, "csrrw", InstructionFormat::SYSTEM_CSR_R, 0x73, 0x1, 0x00, 0x000, 0x00001073, 0x0000707F, false, true, false, false, 31, 31, 31, false, false, false },
+    { Mnemonic::CSRRS, "csrrs", InstructionFormat::SYSTEM_CSR_R, 0x73, 0x2, 0x00, 0x000, 0x00002073, 0x0000707F, false, true, false, false, 31, 31, 31, false, false, false },
+    { Mnemonic::CSRRC, "csrrc", InstructionFormat::SYSTEM_CSR_R, 0x73, 0x3, 0x00, 0x000, 0x00003073, 0x0000707F, false, true, false, false, 31, 31, 31, false, false, false },
+    { Mnemonic::CSRRWI, "csrrwi", InstructionFormat::SYSTEM_CSR_I, 0x73, 0x5, 0x00, 0x000, 0x00005073, 0x0000707F, false, true, false, false, 31, 31, 31, false, false, false },
+    { Mnemonic::CSRRSI, "csrrsi", InstructionFormat::SYSTEM_CSR_I, 0x73, 0x6, 0x00, 0x000, 0x00006073, 0x0000707F, false, true, false, false, 31, 31, 31, false, false, false },
+    { Mnemonic::CSRRCI, "csrrci", InstructionFormat::SYSTEM_CSR_I, 0x73, 0x7, 0x00, 0x000, 0x00007073, 0x0000707F, false, true, false, false, 31, 31, 31, false, false, false },
 }};
 
 const InstructionDescriptor& get_instruction_descriptor(Mnemonic mnemonic) noexcept {
@@ -248,6 +254,48 @@ std::optional<uint8_t> lookup_capreg_by_name(std::string_view name) noexcept {
         }
     }
     return std::nullopt;
+}
+
+const std::array<CsrDescriptor, CSR_COUNT> CSR_TABLE = {{
+    { "sstatus", 0x100, 'S', false, 32 },
+    { "sie", 0x104, 'S', false, 32 },
+    { "stvec", 0x105, 'S', false, 32 },
+    { "scounteren", 0x106, 'S', false, 32 },
+    { "sscratch", 0x140, 'S', false, 32 },
+    { "sepc", 0x141, 'S', false, 32 },
+    { "scause", 0x142, 'S', false, 32 },
+    { "stval", 0x143, 'S', false, 32 },
+    { "sip", 0x144, 'S', false, 32 },
+    { "mstatus", 0x300, 'M', false, 32 },
+    { "misa", 0x301, 'M', true, 32 },
+    { "medeleg", 0x302, 'M', false, 32 },
+    { "mideleg", 0x303, 'M', false, 32 },
+    { "mie", 0x304, 'M', false, 32 },
+    { "mtvec", 0x305, 'M', false, 32 },
+    { "mcounteren", 0x306, 'M', false, 32 },
+    { "mscratch", 0x340, 'M', false, 32 },
+    { "mepc", 0x341, 'M', false, 32 },
+    { "mcause", 0x342, 'M', false, 32 },
+    { "mtval", 0x343, 'M', false, 32 },
+    { "mip", 0x344, 'M', false, 32 },
+}};
+
+std::optional<uint16_t> lookup_csr_by_name(std::string_view name) noexcept {
+    for (const auto& c : CSR_TABLE) {
+        if (c.name == name) {
+            return c.address;
+        }
+    }
+    return std::nullopt;
+}
+
+std::string_view get_csr_name(uint16_t address) noexcept {
+    for (const auto& c : CSR_TABLE) {
+        if (c.address == address) {
+            return c.name;
+        }
+    }
+    return "<csr>";
 }
 
 } // namespace an32

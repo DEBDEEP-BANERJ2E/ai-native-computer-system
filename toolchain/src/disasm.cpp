@@ -89,6 +89,20 @@ std::string Disassembler::disassemble(const DecodedInstruction& inst, bool use_a
             // sfence.vma rs1, rs2
             ss << xname(inst.rs1_idx) << ", " << xname(inst.rs2_idx);
             break;
+
+        case InstructionFormat::SYSTEM_CSR_R: {
+            // csrrw/csrrs/csrrc rd, csr, rs1
+            auto csr_name = get_csr_name(inst.csr_addr);
+            ss << xname(inst.rd_idx) << ", " << csr_name << ", " << xname(inst.rs1_idx);
+            break;
+        }
+
+        case InstructionFormat::SYSTEM_CSR_I: {
+            // csrrwi/csrrsi/csrrci rd, csr, zimm
+            auto csr_name = get_csr_name(inst.csr_addr);
+            ss << xname(inst.rd_idx) << ", " << csr_name << ", " << static_cast<uint32_t>(inst.zimm);
+            break;
+        }
     }
 
     return ss.str();

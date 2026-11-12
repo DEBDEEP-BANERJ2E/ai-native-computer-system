@@ -79,6 +79,18 @@ DecodedInstruction Decoder::decode(uint32_t word, MachineProfile profile) noexce
     res.rs1_idx = static_cast<uint8_t>((word >> 15) & 0x1F);
     res.rs2_idx = static_cast<uint8_t>((word >> 20) & 0x1F);
 
+    // CSR instructions: bits[31:20] are the CSR address, not rs2. The
+    // [19:15] field is rs1 for register forms and zimm for immediate forms.
+    if (desc->format == InstructionFormat::SYSTEM_CSR_R ||
+        desc->format == InstructionFormat::SYSTEM_CSR_I) {
+        res.csr_addr = static_cast<uint16_t>((word >> 20) & 0xFFF);
+        res.rs2_idx  = 0; // [24:20] overlap the CSR address; not an rs2 operand
+        if (desc->format == InstructionFormat::SYSTEM_CSR_I) {
+            res.zimm    = static_cast<uint8_t>((word >> 15) & 0x1F);
+            res.rs1_idx = 0; // [19:15] is zimm, not an integer source register
+        }
+    }
+
     // Extract immediates based on format
     switch (desc->format) {
         case InstructionFormat::R:
@@ -113,6 +125,8 @@ DecodedInstruction Decoder::decode(uint32_t word, MachineProfile profile) noexce
             break;
         case InstructionFormat::SYSTEM_FIXED:
         case InstructionFormat::SYSTEM_R:
+        case InstructionFormat::SYSTEM_CSR_R:
+        case InstructionFormat::SYSTEM_CSR_I:
             res.immediate = 0;
             break;
     }

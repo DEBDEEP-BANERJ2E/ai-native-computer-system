@@ -1,0 +1,189 @@
+# AN32 System-v1 physical memory layout - ASSEMBLY source of truth.
+# Mirrors kernel/memmap.h (C/tooling side). Keep the two in sync; a future
+# linker script will consume the same numbers. Stacks grow DOWNWARD,
+# sp stays 16-byte aligned. Addresses are DMEM (data memory) offsets.
+
+.equ DMEM_BASE,      0x00000000
+.equ DMEM_SIZE,      0x00010000
+.equ DMEM_TOP,       0x00010000
+
+# Stack tops (first push lands at TOP-16 after alignment).
+.equ M_STACK_TOP,    0x00010000     # machine boot stack
+.equ M_STACK_SIZE,   0x00001000
+.equ M_STACK_BASE,   0x0000F000
+
+.equ S_STACK_TOP,    0x0000F000     # supervisor kernel stack
+.equ S_STACK_SIZE,   0x00001000
+.equ S_STACK_BASE,   0x0000E000
+
+.equ U_STACK_TOP,    0x0000E000     # user stack
+.equ U_STACK_SIZE,   0x00001000
+.equ U_STACK_BASE,   0x0000D000
+
+.equ KDATA_BASE,     0x0000C000     # early kernel/trap scratch data
+.equ KDATA_SIZE,     0x00001000
+
+# ---- B3 trap-frame ABI (144 bytes, 16B-aligned) ----
+# Layout: x1..x31 at (N-1)*4, then sepc/sstatus/scause/stval.
+# TF_SP slot holds the TRAPPED user sp (from sscratch), not kernel sp.
+.equ TF_SIZE,    144
+.equ TF_SEPC,    124
+.equ TF_SSTATUS, 128
+.equ TF_SCAUSE,  132
+.equ TF_STVAL,   136
+# KDATA observation area: kernel copies select frame fields here for the test.
+.equ KOBS_BASE,  0x0000C000
+.equ KOBS_SP,    0x0000C000   # trapped user sp
+.equ KOBS_RA,    0x0000C004   # x1
+.equ KOBS_S0,    0x0000C008   # x8 saved reg
+.equ KOBS_T0,    0x0000C00C   # x5 temp
+.equ KOBS_SEPC,  0x0000C010
+.equ KOBS_SCAUSE,0x0000C014
+.equ KOBS_SSTATUS,0x0000C018
+
+# ---- B4 syscall ABI ----
+# a7 = syscall number, a0-a5 = args 0..5, a0 = return (negative = -errno).
+.equ SYS_GETABI,      0     # returns ABI/kernel version constant
+.equ SYS_DEBUG_ARGS,  1     # stores a0..a5 to KARGS_BASE, returns 6
+.equ ENOSYS,          38    # unknown syscall -> a0 = -ENOSYS
+.equ SYS_ABI_VERSION, 0xB4  # B4 ABI marker returned by SYS_GETABI
+# KDATA area where SYS_DEBUG_ARGS echoes the six argument registers.
+.equ KARGS_BASE,      0x0000C040
+
+# ---- B5 timer / interrupt platform constants ----
+.equ MTIME_LO,     0x80003000
+.equ MTIME_HI,     0x80003004
+.equ MTIMECMP_LO,  0x80003008
+.equ MTIMECMP_HI,  0x8000300C
+.equ IRQ_STIP,     5            # supervisor timer interrupt code
+.equ IRQ_MTIP,     7            # machine timer interrupt code
+.equ CAUSE_INT,    0x80000000   # scause/mcause interrupt bit
+.equ CAUSE_MASK,   0x7FFFFFFF
+.equ MIP_STIP,     0x20         # mip/sip bit5 = STIP pending
+.equ MIE_MTIE,     0x80         # mie bit7 = MTIE
+.equ MIE_STIE,     0x20         # mie/sie bit5 = STIE
+.equ MIDELEG_STIP, 0x20         # mideleg bit5 -> STIP targets S
+.equ MSTATUS_MIE,  0x08         # mstatus bit3 = MIE
+.equ MSTATUS_SIE,  0x02         # mstatus bit1 = SIE (supervisor int enable)
+.equ MSTATUS_ALL,  0x80A        # MIE|SIE|MPP=S used at boot
+.equ TIMER_INTERVAL, 2048        # mtime ticks between timer interrupts
+.equ KTICKS,       0x0000C080   # KDATA kernel tick counter
+.equ MIE_MTIE_STIE, 0xA0         # mie = MTIE(bit7)|STIE(bit5)
+# B5 M-handler diagnostics (temporary): prove MTIP rearm + STIP set.
+.equ KMTICKS,      0x0000C084    # M timer handler entry count
+.equ KMIP_AFTER_SET,0x0000C088   # mip snapshot after STIP write
+.equ KMTIME_LO,    0x0000C08C    # mtime lo snapshot at rearm
+.equ KMTIME_HI,    0x0000C090    # mtime hi snapshot at rearm
+.equ KMTIMECMP_LO, 0x0000C094    # mtimecmp lo snapshot after rearm
+.equ KMTIMECMP_HI, 0x0000C098    # mtimecmp hi snapshot after rearm
+
+# ---- B6 context switching ----
+# Per-process saved TrapFrame slots (144B each) in KDATA. The kernel stack is
+# shared scratch: the trap frame is transient, so only one frame is live at a
+# time; context_switch copies it to/from these persistent slots.
+.equ CTX_BASE,      0x0000C100    # first context slot
+.equ CTX_STRIDE,    144           # == TF_SIZE
+.equ CTX0,          0x0000C100    # process 0 slot
+.equ CTX1,          0x0000C190    # process 1 slot (0xC100+0x90)
+.equ CTX2,          0x0000C220    # process 2 slot
+.equ CUR_PID,       0x0000C0F8    # KDATA: currently-running pid
+.equ NEXT_PID,      0x0000C0FC    # KDATA: pid to switch to
+.equ KB_MARKER,     0x0000C0A0    # KDATA: B6 proof - u_alt writes marker here
+
+# ---- B7 process table (PCB) ----
+# One PCB per pid; the saved TrapFrame lives in the CTX slot at
+# CTX_BASE + pid*CTX_STRIDE. pid indexes both tables (MAX_PROC bounded by
+# available CTX slots in KDATA).
+.equ MAX_PROC,      4
+.equ PCB_BASE,      0x0000C400    # after CTX slots (0xC100..0xC33F)
+.equ PCB_STRIDE,    32
+.equ PCB_STATE,     0               # +0  PSTATE_*
+.equ PCB_PID,       4               # +4  pid (== index)
+.equ PCB_ENTRY,     8               # +8  entry pc
+.equ PCB_USP,       12              # +12 user stack top
+.equ PCB_KSP,       16              # +16 kernel stack top (reserved; shared now)
+.equ PCB_EXIT,      20              # +20 exit status
+.equ PCB_VRUNTIME,  24              # +24 scheduling metadata (B8)
+.equ PCB_FLAGS,     28              # +28 addr-space/capability placeholders
+# process states
+.equ PSTATE_UNUSED,  0
+.equ PSTATE_READY,   1
+.equ PSTATE_RUNNING, 2
+.equ PSTATE_BLOCKED, 3
+.equ PSTATE_ZOMBIE,  4
+.equ SYS_EXIT,       4             # terminate current process -> ZOMBIE
+
+# ---- B8 scheduler ----
+# Invoked from the timer path (s_timer_irq -> sched_tick). Two policies:
+#   SCHED_RR    - round-robin over runnable procs (reference baseline)
+#   SCHED_EEVDF - earliest-eligible-virtual-deadline-first on vruntime
+.equ SCHED_MODE,    0x0000C0B0    # KDATA: SCHED_RR | SCHED_EEVDF
+.equ SCHED_QUANTUM, 0x0000C0B4    # KDATA: ticks per timeslice
+.equ SCHED_QLEFT,   0x0000C0B8    # KDATA: quantum remaining for cur proc
+.equ SCHED_RR_NEXT, 0x0000C0BC    # KDATA: round-robin cursor (pid)
+.equ SCHED_RR,      0
+.equ SCHED_EEVDF,   1
+.equ QUANTUM_TICKS, 8             # default timeslice in timer ticks
+
+# ---- Stage D: process runtime / heap ----
+# Per-pid program break (brk) pointer. Heap grows up from HEAP_INIT.
+.equ HEAP_BASE,     0x0000C600    # per-pid brk pointers (4B each, MAX_PROC)
+.equ HEAP_INIT,     0x0000D000    # initial program break (above U stack)
+.equ SYS_BRK,       5             # a0=delta -> a0=old brk, sets new
+.equ SYS_SBRK,      6             # a0=increment -> a0=old brk (alloc)
+
+# ---- Stage E: IPC / synchronization primitives ----
+# sleep puts current proc BLOCKED and yields; wake(pid) makes it READY.
+# yield is a voluntary context switch. Mutex = simple test-and-set flag.
+.equ SYS_SLEEP,     7             # block current until woken
+.equ SYS_WAKE,      8             # a0=pid -> READY
+.equ SYS_YIELD,     9             # voluntary reschedule
+.equ SYS_MUTEX_LOCK,  10          # a0=mutex id -> acquire (spin)
+.equ SYS_MUTEX_UNLOCK,11         # a0=mutex id -> release
+.equ MUTEX_BASE,    0x0000C700    # per-mutex flags (4B each)
+.equ MAX_MUTEX,     8
+
+# ---- Stage H: telemetry / observability counters ----
+# Cheap KDATA counters the shell/monitor (Stage I) can read.
+.equ TEL_SWITCHES,  0x0000C800    # context switches
+.equ TEL_SYSCALLS,  0x0000C804    # syscall count
+.equ TEL_TICKS,     KTICKS        # alias: timer ticks already counted
+.equ TEL_PAGEFAULTS,0x0000C808    # reserved for Stage C
+.equ TEL_WAKEUPS,   0x0000C80C    # sleep->wake transitions
+.equ TEL_SYSCALLS_HI,0x0000C810   # high-word telemetry (reserved)
+
+# ---- Stage I: integrated kernel surface (monitor) ----
+# SYS_MONITOR dumps the process table + telemetry into KMON so the test /
+# shell can observe scheduler state without a debugger.
+.equ SYS_MONITOR,   12            # dump proc table + telemetry -> KMON
+.equ KMON_BASE,     0x0000C900    # monitor output area
+.equ KMON_NPROC,    0             # +0  proc count scanned
+.equ KMON_STATES,   4             # +4  packed per-pid states (nibble each)
+.equ KMON_PIDS,     8             # +8  packed per-pid pids
+.equ KMON_SWITCHES, 16            # +16 TEL_SWITCHES snapshot
+.equ KMON_SYSCALLS, 20            # +20 TEL_SYSCALLS snapshot
+.equ KMON_TICKS,    24            # +24 KTICKS snapshot
+.equ KMON_WAKEUPS,  28            # +28 TEL_WAKEUPS snapshot
+
+# ---- Stage F: kernel I/O descriptor layer ----
+# Per-process fd table. fd -> {type, target}. Types: FD_FREE/CONSOLE/KDATA.
+# SYS_OPEN allocates, SYS_READ/SYS_WRITE service, SYS_CLOSE frees.
+.equ FD_BASE,       0x0000CA00    # fd table: MAX_PROC x MAX_FD x 8B
+.equ MAX_FD,        4
+.equ FD_TYPE,       0             # +0  FD_CONSOLE/FD_KDATA/FD_FREE
+.equ FD_TARGET,     4             # +4  target (kdata addr / device id)
+.equ FD_CONSOLE,    1
+.equ FD_KDATA,      2
+.equ FD_FREE,       0
+.equ SYS_GETPID,    17            # a0 unused -> a0=pid
+.equ SYS_OPEN,      13            # a0=type a1=target -> a0=fd or -errno
+.equ SYS_READ,      14            # a0=fd a1=buf a2=len -> a0=count
+.equ SYS_WRITE,     15            # a0=fd a1=buf a2=len -> a0=count
+.equ SYS_CLOSE,     16            # a0=fd -> a0=0/-errno
+
+# ---- Stage G: capability context (placeholder) ----
+# c0-c7 tagged-capability spill/reload is NOT yet mechanised (see B3 note);
+# PCB_FLAGS reserves the field. SYS_CAPS reports capability state only.
+.equ SYS_CAPS,      18            # a0=cap idx -> a0=cap flags (0=none yet)
+.equ SYS_SPAWN,     2             # prepare a context slot from live frame
+.equ SYS_SWITCH,    3             # context_switch to NEXT_PID

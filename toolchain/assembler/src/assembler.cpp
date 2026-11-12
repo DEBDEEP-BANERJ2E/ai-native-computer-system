@@ -64,7 +64,23 @@ std::optional<an32::Mnemonic> lookup_mnemonic(std::string_view name) {
         {"clw",        an32::Mnemonic::CLW},
         {"csb",        an32::Mnemonic::CSB},
         {"csh",        an32::Mnemonic::CSH},
-        {"csw",        an32::Mnemonic::CSW}
+        {"csw",        an32::Mnemonic::CSW},
+
+        // System-v1 CSR instructions
+        {"csrrw",  an32::Mnemonic::CSRRW},
+        {"csrrs",  an32::Mnemonic::CSRRS},
+        {"csrrc",  an32::Mnemonic::CSRRC},
+        {"csrrwi", an32::Mnemonic::CSRRWI},
+        {"csrrsi", an32::Mnemonic::CSRRSI},
+        {"csrrci", an32::Mnemonic::CSRRCI},
+
+        // System-v1 fixed-field and fence instructions
+        {"ecall",      an32::Mnemonic::ECALL},
+        {"ebreak",     an32::Mnemonic::EBREAK},
+        {"mret",       an32::Mnemonic::MRET},
+        {"sret",       an32::Mnemonic::SRET},
+        {"fence.i",    an32::Mnemonic::FENCE_I},
+        {"sfence.vma", an32::Mnemonic::SFENCE_VMA}
     };
 
     auto it = mnem_map.find(lower);
@@ -102,8 +118,18 @@ std::unique_ptr<AssemblerObject> Assembler::assemble_string(const std::string& s
     Lexer lexer(sm_, file_id, diag_);
     auto raw_tokens = lexer.tokenize();
 
+    // Resolve .include relative to the including source file's directory
+    // first, then the explicit -I paths / ".".
+    auto inc_paths = options_.include_paths;
+    {
+        const auto slash = filename.find_last_of('/');
+        if (slash != std::string::npos) {
+            inc_paths.insert(inc_paths.begin(), filename.substr(0, slash));
+        }
+    }
+
     // 2. Token-Aware Macro & Source Expansion
-    SourceExpander expander(sm_, diag_, options_.include_paths);
+    SourceExpander expander(sm_, diag_, inc_paths);
     auto expanded_tokens = expander.expand(raw_tokens);
 
     // 3. Parsing into AST
@@ -377,15 +403,26 @@ void Assembler::process_statements(const std::vector<StatementPtr>& stmts, Secti
                 continue;
             }
             if (d->directive_type == TokenType::DIR_EQU || d->directive_type == TokenType::DIR_SET) {
-                if (!d->symbol_arg.empty() && !d->expr_args.empty()) {
-                    auto val = eval.evaluate_absolute(d->expr_args[0], &symtab);
-                    if (val.has_value()) {
-                        auto* sym = symtab.get_or_create(d->symbol_arg);
-                        sym->is_defined = true;
-                        sym->is_absolute = true;
-                        sym->value = static_cast<uint64_t>(*val);
+                if (d->symbol_arg.empty() || d->expr_args.empty()) {
+                    diag_.error(d->span, ".equ/.set requires 'NAME, expression'");
+                    continue;
+                }
+                auto val = eval.evaluate_absolute(d->expr_args[0], &symtab);
+                if (!val.has_value()) {
+                    diag_.error(d->span, "could not evaluate absolute expression for '" + d->symbol_arg + "'");
+                    continue;
+                }
+                const bool is_equ = (d->directive_type == TokenType::DIR_EQU);
+                const auto* existing = symtab.find(d->symbol_arg);
+                if (existing && existing->is_defined) {
+                    if (is_equ) {
+                        diag_.error(d->span, "redefinition of equate '" + d->symbol_arg + "' (.equ is immutable; use .set)");
+                        continue;
                     }
                 }
+                auto* sym = symtab.define_symbol(d->symbol_arg, std::nullopt,
+                                                 static_cast<uint64_t>(*val), d->span);
+                sym->is_absolute = true;
                 continue;
             }
             if (d->directive_type == TokenType::DIR_FILE) {
@@ -417,7 +454,19 @@ void Assembler::process_statements(const std::vector<StatementPtr>& stmts, Secti
                     auipc_anchor_off = inst_offset;
                 }
 
+                // CSR instructions carry a CSR name/number in operand[1]; it is
+                // resolved to a 12-bit address by encode_instructions (get_csr),
+                // not treated as a relocatable symbol fixup.
+                const bool is_csr_inst = (*mnem_opt == an32::Mnemonic::CSRRW ||
+                                          *mnem_opt == an32::Mnemonic::CSRRS ||
+                                          *mnem_opt == an32::Mnemonic::CSRRC ||
+                                          *mnem_opt == an32::Mnemonic::CSRRWI ||
+                                          *mnem_opt == an32::Mnemonic::CSRRSI ||
+                                          *mnem_opt == an32::Mnemonic::CSRRCI);
+                size_t op_index = 0;
                 for (const auto& op : exp_inst.operands) {
+                    const bool is_csr_operand = is_csr_inst && (op_index == 1);
+                    ++op_index;
                     ExprPtr expr;
                     if (op->kind == OperandKind::IMMEDIATE) {
                         expr = std::static_pointer_cast<ImmediateOperand>(op)->expr;
@@ -425,7 +474,7 @@ void Assembler::process_statements(const std::vector<StatementPtr>& stmts, Secti
                         expr = std::static_pointer_cast<MemoryOperand>(op)->offset;
                     }
 
-                    if (expr) {
+                    if (expr && !is_csr_operand) {
                         auto res = eval.evaluate(expr, &symtab, inst_offset);
                         if (res.kind == EvalKind::RELOCATABLE || res.kind == EvalKind::RELOC_MODIFIED) {
                             Fixup f;
@@ -594,6 +643,44 @@ void Assembler::encode_instructions(SectionTable& sec_table, SymbolTable& symtab
             }
         }
         return 0;
+    };
+
+    // Resolve a CSR operand: a symbolic name from spec/csr.yaml or a legal
+    // 12-bit numeric literal. Rejects unknown names, out-of-range values and
+    // non-operand expressions.
+    auto get_csr = [this](const OperandPtr& op, const SourceSpan& span) -> std::optional<uint16_t> {
+        if (!op || op->kind != OperandKind::IMMEDIATE) {
+            diag_.error(span, "expected CSR operand (name or 12-bit literal)");
+            return std::nullopt;
+        }
+        auto expr = std::static_pointer_cast<ImmediateOperand>(op)->expr;
+        if (!expr) {
+            diag_.error(span, "empty CSR operand");
+            return std::nullopt;
+        }
+        if (expr->kind == an32asm::ExprKind::SYMBOL) {
+            auto* sym = static_cast<an32asm::SymbolExpr*>(expr.get());
+            if (sym->is_local_numeric) {
+                diag_.error(span, "numeric local label is not a valid CSR operand");
+                return std::nullopt;
+            }
+            auto addr = an32::lookup_csr_by_name(sym->name);
+            if (!addr) {
+                diag_.error(span, "unknown CSR name: " + sym->name);
+                return std::nullopt;
+            }
+            return *addr;
+        }
+        if (expr->kind == an32asm::ExprKind::CONSTANT) {
+            int64_t v = static_cast<an32asm::ConstantExpr*>(expr.get())->value;
+            if (v < 0 || v > 0xFFF) {
+                diag_.error(span, "CSR address out of range [0..0xFFF]: " + std::to_string(v));
+                return std::nullopt;
+            }
+            return static_cast<uint16_t>(v);
+        }
+        diag_.error(span, "CSR operand must be a name or numeric literal");
+        return std::nullopt;
     };
 
 
@@ -937,6 +1024,69 @@ void Assembler::encode_instructions(SectionTable& sec_table, SymbolTable& symtab
                             }
                         }
                     }
+                }
+            }
+            // System-v1 fixed-field instructions: ecall/ebreak/mret/sret/fence.i
+            // The descriptor match_val is the complete fixed 32-bit encoding
+            // (mask_val == 0xFFFFFFFF for SYSTEM_FIXED).
+            else if (an32::get_instruction_descriptor(m).format == an32::InstructionFormat::SYSTEM_FIXED) {
+                if (ops.empty()) {
+                    word = an32::get_instruction_descriptor(m).match_val;
+                } else {
+                    diag_.error(sp, "fixed system instruction takes no operands");
+                }
+            }
+            // System-v1 SYSTEM_R: sfence.vma rs1, rs2
+            else if (m == an32::Mnemonic::SFENCE_VMA) {
+                if (ops.size() >= 2) {
+                    auto rs1 = get_xreg(ops[0], sp);
+                    auto rs2 = get_xreg(ops[1], sp);
+                    if (rs1 && rs2) {
+                        const auto& d = an32::get_instruction_descriptor(m);
+                        word = (d.opcode & 0x7F) |
+                               ((d.funct3 & 0x7) << 12) |
+                               ((rs1->index & 0x1F) << 15) |
+                               ((rs2->index & 0x1F) << 20) |
+                               ((d.funct7 & 0x7F) << 25);
+                    }
+                } else {
+                    diag_.error(sp, "sfence.vma requires 2 operands: rs1, rs2");
+                }
+            }
+            // System-v1 CSR register forms: csrrw/csrrs/csrrc rd, csr, rs1
+            else if (m == an32::Mnemonic::CSRRW || m == an32::Mnemonic::CSRRS ||
+                     m == an32::Mnemonic::CSRRC) {
+                if (ops.size() >= 3) {
+                    auto rd  = get_xreg(ops[0], sp);
+                    auto csr = get_csr(ops[1], sp);
+                    auto rs1 = get_xreg(ops[2], sp);
+                    if (rd && csr && rs1) {
+                        auto res = an32::Encoder::encode_csr_reg(m, *rd, *csr, *rs1);
+                        if (res.is_ok()) word = res.value();
+                        else diag_.error(sp, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                    }
+                } else {
+                    diag_.error(sp, "CSR instruction requires 3 operands: rd, csr, rs1");
+                }
+            }
+            // System-v1 CSR immediate forms: csrrwi/csrrsi/csrrci rd, csr, zimm
+            else if (m == an32::Mnemonic::CSRRWI || m == an32::Mnemonic::CSRRSI ||
+                     m == an32::Mnemonic::CSRRCI) {
+                if (ops.size() >= 3) {
+                    auto rd  = get_xreg(ops[0], sp);
+                    auto csr = get_csr(ops[1], sp);
+                    int64_t zimm_val = get_imm_val(ops[2], inst_offset);
+                    if (rd && csr) {
+                        if (zimm_val < 0 || zimm_val > 31) {
+                            diag_.error(sp, "CSR immediate out of range [0..31]: " + std::to_string(zimm_val));
+                        } else {
+                            auto res = an32::Encoder::encode_csr_imm(m, *rd, *csr, static_cast<uint8_t>(zimm_val));
+                            if (res.is_ok()) word = res.value();
+                            else diag_.error(sp, std::string("instruction encoding error: ") + std::string(an32::to_string(res.error())));
+                        }
+                    }
+                } else {
+                    diag_.error(sp, "CSR instruction requires 3 operands: rd, csr, zimm");
                 }
             }
 

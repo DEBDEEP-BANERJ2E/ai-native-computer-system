@@ -80,6 +80,12 @@ enum class Mnemonic : uint16_t {
     MRET,
     SFENCE_VMA,
     FENCE_I,
+    CSRRW,
+    CSRRS,
+    CSRRC,
+    CSRRWI,
+    CSRRSI,
+    CSRRCI,
     UNKNOWN_ILLEGAL
 };
 
@@ -94,7 +100,9 @@ enum class InstructionFormat : uint8_t {
     CAP_MEM_I,
     CAP_MEM_S,
     SYSTEM_FIXED,
-    SYSTEM_R
+    SYSTEM_R,
+    SYSTEM_CSR_R,
+    SYSTEM_CSR_I
 };
 
 struct InstructionDescriptor {
@@ -120,7 +128,7 @@ struct InstructionDescriptor {
 };
 
 inline constexpr size_t BARE_V1_INSTRUCTION_COUNT = 60;
-inline constexpr size_t TOTAL_INSTRUCTION_COUNT = 66;
+inline constexpr size_t TOTAL_INSTRUCTION_COUNT = 72;
 
 inline constexpr std::string_view SPEC_PROVENANCE = "phase0-freeze-v1.0 (commit 43674bd)";
 
@@ -139,5 +147,18 @@ std::optional<uint8_t> lookup_xreg_by_name(std::string_view name) noexcept;
 std::string_view get_capreg_name(uint8_t reg_idx) noexcept;
 std::string_view get_capreg_abi_name(uint8_t reg_idx) noexcept;
 std::optional<uint8_t> lookup_capreg_by_name(std::string_view name) noexcept;
+
+// Control & Status Register namespace (System-v1 privileged architecture)
+struct CsrDescriptor {
+    std::string_view name;
+    uint16_t address;
+    char privilege;   // 'U', 'S', or 'M' (minimum privilege)
+    bool read_only;
+    uint8_t width;
+};
+inline constexpr size_t CSR_COUNT = 21;
+extern const std::array<CsrDescriptor, CSR_COUNT> CSR_TABLE;
+std::optional<uint16_t> lookup_csr_by_name(std::string_view name) noexcept;
+std::string_view get_csr_name(uint16_t address) noexcept;
 
 } // namespace an32

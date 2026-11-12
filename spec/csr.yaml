@@ -1,0 +1,34 @@
+# AN32 System-v1 Control & Status Register (CSR) namespace.
+# Single source of truth for CSR addresses consumed by the assembler,
+# disassembler, compiler, debugger and kernel tooling.
+#
+# address: 12-bit CSR address (instruction bits [31:20]).
+# privilege: minimum privilege required to access (U/S/M).
+# read_only: if true the CSR cannot be written by software.
+# width: architectural width in bits.
+
+csrs:
+  # ---- Supervisor (S/U accessible when delegated) ----
+  - { name: sstatus,   address: 0x100, privilege: S, read_only: false, width: 32 }
+  - { name: sie,       address: 0x104, privilege: S, read_only: false, width: 32 }
+  - { name: stvec,     address: 0x105, privilege: S, read_only: false, width: 32 }
+  - { name: scounteren,address: 0x106, privilege: S, read_only: false, width: 32 }
+  - { name: sscratch,  address: 0x140, privilege: S, read_only: false, width: 32 }
+  - { name: sepc,      address: 0x141, privilege: S, read_only: false, width: 32 }
+  - { name: scause,    address: 0x142, privilege: S, read_only: false, width: 32 }
+  - { name: stval,     address: 0x143, privilege: S, read_only: false, width: 32 }
+  - { name: sip,       address: 0x144, privilege: S, read_only: false, width: 32 }
+  # ---- Hypervisor (reserved; present for completeness) ----
+  # ---- Machine (M only) ----
+  - { name: mstatus,   address: 0x300, privilege: M, read_only: false, width: 32 }
+  - { name: misa,      address: 0x301, privilege: M, read_only: true,  width: 32 }
+  - { name: medeleg,   address: 0x302, privilege: M, read_only: false, width: 32 }
+  - { name: mideleg,   address: 0x303, privilege: M, read_only: false, width: 32 }
+  - { name: mie,       address: 0x304, privilege: M, read_only: false, width: 32 }
+  - { name: mtvec,     address: 0x305, privilege: M, read_only: false, width: 32 }
+  - { name: mcounteren,address: 0x306, privilege: M, read_only: false, width: 32 }
+  - { name: mscratch,  address: 0x340, privilege: M, read_only: false, width: 32 }
+  - { name: mepc,      address: 0x341, privilege: M, read_only: false, width: 32 }
+  - { name: mcause,    address: 0x342, privilege: M, read_only: false, width: 32 }
+  - { name: mtval,     address: 0x343, privilege: M, read_only: false, width: 32 }
+  - { name: mip,       address: 0x344, privilege: M, read_only: false, width: 32 }

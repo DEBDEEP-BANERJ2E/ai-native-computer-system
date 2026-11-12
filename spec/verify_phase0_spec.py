@@ -96,6 +96,11 @@ def compute_instruction_match_mask(inst):
         match_val |= (funct3 & 0x7) << 12
         match_val |= (funct7 & 0x7F) << 25
         mask_val  |= (0x7 << 12) | (0x7F << 25) | (0x1F << 7) # rd=0
+    elif fmt in ("SYSTEM_CSR_R", "SYSTEM_CSR_I"):
+        # Only opcode[6:0] and funct3[14:12] are fixed; csr[31:20] is the
+        # variable CSR address and rs1/zimm[19:15] is an operand field.
+        match_val |= (funct3 & 0x7) << 12
+        mask_val  |= (0x7 << 12)
 
     return match_val, mask_val
 
