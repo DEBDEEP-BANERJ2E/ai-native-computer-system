@@ -1,6 +1,7 @@
 import React from "react";
 import { Cpu, RotateCcw, ShieldCheck, Zap } from "lucide-react";
 import { SimulationState, ScenarioItem } from "../types";
+import { ThemeToggle } from "../ThemeToggle";
 
 interface HeaderProps {
   state: SimulationState | null;
@@ -65,6 +66,8 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="engine-dot" />
           <span>ENGINE: {isRtl ? "RTL / Verilator (Cycle-Accurate)" : "Python Reference (ISA Golden)"}</span>
         </div>
+
+        <ThemeToggle />
 
         {/* Reset Button */}
         <button className="btn btn-secondary" onClick={onReset} title="Reset Simulation">
