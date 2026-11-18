@@ -666,6 +666,10 @@ html[data-theme="light"] .btn-purple {
   color: #000;
 }
 
+.btn-purple {
+  transition-property: transform, box-shadow;
+}
+
 html[data-theme="light"] img,
 html[data-theme="light"] video,
 html[data-theme="light"] picture {
