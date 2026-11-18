@@ -15,6 +15,7 @@ import { MultipliersLab } from "./components/labs/MultipliersLab";
 import { AluLab } from "./components/labs/AluLab";
 import { TelemetryLab } from "./components/labs/TelemetryLab";
 import { CircuitInspectorModal, type InspectableUnit } from "./components/CircuitInspectorModal";
+import { ThemeToggle } from "./ThemeToggle";
 
 const initialResponse: SimulationResponse = {
   result: 0,
@@ -151,6 +152,7 @@ export default function App() {
         </div>
 
         <div className="topbar-right">
+          <ThemeToggle />
           <div className={`rtl-status-indicator ${rtlOnline ? "online" : "offline"}`}>
             <span className="pulse-dot" />
             <span>{rtlOnline ? "RTL SIMULATOR ONLINE" : "RTL ENGINE OFFLINE"}</span>
