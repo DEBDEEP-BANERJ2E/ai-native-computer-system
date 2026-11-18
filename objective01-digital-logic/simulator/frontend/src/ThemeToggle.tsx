@@ -14,7 +14,11 @@ export function ThemeToggle() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem(STORAGE_KEY, theme);
+    try {
+      localStorage.setItem(STORAGE_KEY, theme);
+    } catch {
+      // Storage unavailable (e.g. blocked by browser settings); theme just won't persist.
+    }
   }, [theme]);
 
   const isLight = theme === "light";

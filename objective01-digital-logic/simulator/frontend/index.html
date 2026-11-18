@@ -4,8 +4,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Objective 1 Hardware Workbench</title>
     <script>
-      document.documentElement.dataset.theme =
-        localStorage.getItem("simulator-theme") === "light" ? "light" : "dark";
+      try {
+        document.documentElement.dataset.theme =
+          localStorage.getItem("simulator-theme") === "light" ? "light" : "dark";
+      } catch {
+        document.documentElement.dataset.theme = "dark";
+      }
     </script>
   </head>
   <body>
